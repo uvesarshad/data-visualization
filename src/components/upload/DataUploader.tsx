@@ -19,19 +19,28 @@ export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
 
   const handleFile = async (file: File) => {
     setError(null);
-    if (!file.name.endsWith('.csv') && !file.name.endsWith('.json')) {
-      setError('Please upload a CSV or JSON file.');
+    const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+    const isCsv = file.name.endsWith('.csv');
+    const isJson = file.name.endsWith('.json');
+
+    if (!isCsv && !isJson && !isExcel) {
+      setError('Please upload a CSV, JSON, or Excel file.');
       return;
     }
 
     try {
-      const text = await file.text();
       let data: any[] = [];
       
-      if (file.name.endsWith('.csv')) {
+      if (isCsv) {
+        const text = await file.text();
         const { parseCSV } = await import('@/app/lib/data-processor');
         data = parseCSV(text);
+      } else if (isExcel) {
+        const buffer = await file.arrayBuffer();
+        const { parseExcel } = await import('@/app/lib/data-processor');
+        data = parseExcel(buffer);
       } else {
+        const text = await file.text();
         data = JSON.parse(text);
       }
 
@@ -92,7 +101,7 @@ export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
         <div>
           <h2 className="text-2xl font-headline font-bold mb-2">Upload your Data</h2>
           <p className="text-muted-foreground text-sm max-w-sm">
-            Drag and drop your CSV or JSON files here, or click to browse. DataSense will automatically generate your dashboard.
+            Drag and drop your CSV, JSON or Excel files here, or click to browse. DataSense will automatically generate your dashboard.
           </p>
         </div>
 
@@ -101,7 +110,7 @@ export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
           ref={fileInputRef} 
           onChange={onFileSelect} 
           className="hidden" 
-          accept=".csv,.json"
+          accept=".csv,.json,.xlsx,.xls"
         />
 
         {error && (

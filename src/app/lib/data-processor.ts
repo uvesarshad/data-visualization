@@ -1,6 +1,7 @@
 
 import { ColumnMetadataSchema } from '@/ai/flows/ai-powered-visualization-recommendations';
 import { z } from 'zod';
+import * as XLSX from 'xlsx';
 
 export type ColumnMetadata = z.infer<typeof ColumnMetadataSchema>;
 
@@ -19,6 +20,13 @@ export function parseCSV(csv: string) {
     return obj;
   });
   return rows;
+}
+
+export function parseExcel(buffer: ArrayBuffer): any[] {
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+  return XLSX.utils.sheet_to_json(worksheet);
 }
 
 export function extractMetadata(data: any[]): ColumnMetadata[] {
