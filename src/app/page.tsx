@@ -8,15 +8,13 @@ import {
   FileText, 
   BrainCircuit, 
   Sparkles, 
-  Plus, 
-  Layers,
-  Search,
-  ChevronRight,
   Database,
   Moon,
   Sun,
   LayoutGrid,
-  Zap
+  Zap,
+  ChevronRight,
+  Search
 } from 'lucide-react';
 import { DataUploader } from '@/components/upload/DataUploader';
 import { ChartPanel } from '@/components/dashboard/ChartPanel';
@@ -265,7 +263,7 @@ export default function DataSenseDashboard() {
               </TabsContent>
 
               <TabsContent value="raw" className="m-0">
-                <Card className="border-border/50 bg-card/20 overflow-hidden">
+                <Card className="border-border bg-card/30 overflow-hidden">
                   <div className="p-0 max-h-[75vh] overflow-auto">
                     <Table>
                       <TableHeader className="bg-card/80 backdrop-blur sticky top-0 z-10 border-b border-border">

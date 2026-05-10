@@ -1,4 +1,3 @@
-
 import { ColumnMetadataSchema } from '@/ai/flows/ai-powered-visualization-recommendations';
 import { z } from 'zod';
 import * as XLSX from 'xlsx';
@@ -14,7 +13,7 @@ export function parseCSV(csv: string) {
     const obj: any = {};
     headers.forEach((h, i) => {
       let val: any = values[i]?.trim();
-      if (!isNaN(val) && val !== '') val = Number(val);
+      if (!isNaN(val as any) && val !== '') val = Number(val);
       obj[h] = val;
     });
     return obj;

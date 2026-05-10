@@ -27,7 +27,7 @@ import {
   ComposedChart,
 } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
+import { ChartContainer, ChartTooltipContent } from '@/components/ui/chart';
 
 interface ChartPanelProps {
   type: string;
@@ -53,8 +53,7 @@ const COLORS = [
 ];
 
 export function ChartPanel({ type, data, title, description, config }: ChartPanelProps) {
-  // Simple check for numeric data to avoid chart crashes
-  const safeData = data.slice(0, 50); // limit to 50 for performance
+  const safeData = data.slice(0, 50);
 
   const chartConfig = {
     [config.yAxis]: {
@@ -119,7 +118,6 @@ export function ChartPanel({ type, data, title, description, config }: ChartPane
           </AreaChart>
         );
       case 'pie_chart':
-        // For pie chart, usually small data sets are better. Sample top 8
         const pieData = safeData.slice(0, 8);
         return (
           <PieChart>
@@ -130,7 +128,7 @@ export function ChartPanel({ type, data, title, description, config }: ChartPane
               outerRadius={70}
               dataKey={config.yAxis}
               nameKey={config.xAxis}
-              label={({name}) => name.substring(0, 10)}
+              label={({name}) => name?.toString().substring(0, 10)}
             >
               {pieData.map((_, index) => (
                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
