@@ -15,28 +15,56 @@ DataSense transforms the traditional data analysis workflow. Instead of manually
 - **Data Handling**: `xlsx` for Excel parsing, custom CSV/JSON processors
 - **Theme**: `next-themes` (Dark/Light mode support)
 
+### 📖 Documentation
+
+For detailed technical documentation designed for AI agents and developers, see [docs/overview.md](docs/overview.md).
+
 ### 🤖 AI Capabilities
-The application leverages two core Genkit flows:
+The application leverages 7 specialized Genkit AI flows:
 
-1.  **Visualization Recommender (`recommendVisualizations`)**:
-    - Analyzes column data types (Numerical, Categorical, Temporal).
-    - Suggests up to 9 diverse chart types (Bar, Line, Radar, Area, Scatter, etc.).
-    - Maps the most relevant columns to X and Y axes automatically.
+1.  **Visualization Recommender**: Recommends up to 9 optimal chart types based on metadata.
+2.  **Data Insights Engine**: Generates narrative insights, key findings, and predictions.
+3.  **Natural Language Query**: Converts user questions into dynamic visualizations.
+4.  **Per-Chart Analysis**: Deep-dives into a specific chart's data patterns.
+5.  **Executive Report Generation**: Creates comprehensive summaries and action items.
+6.  **Anomaly Detection**: Explains statistical outliers with business context.
+7.  **Batch Analysis**: Correlates patterns across multiple charts.
 
-2.  **Data Insights Engine (`aiGeneratedDataInsights`)**:
-    - Processes data samples to find correlations and anomalies.
-    - Generates detailed analytical insights.
-    - Provides key findings and forward-looking predictions.
-    - Supports "Reasoning Mode" for grounded analysis using Gemini's extensive knowledge.
+### 📂 Architecture & Workflow
 
-### 📂 Architecture
-- `src/ai/flows/`: Contains the logic for AI-driven recommendations and insights.
-- `src/components/dashboard/`: Reusable visualization and insight panels.
-- `src/app/lib/data-processor.ts`: Core logic for extracting metadata and parsing various file formats.
-- `src/firebase/`: Scaffolding for Firebase integration (Auth/Firestore ready).
+```mermaid
+graph TD
+    A[User Uploads File] --> B{File Type?}
+    B -- CSV/JSON --> C[parseCSV / JSON.parse]
+    B -- Excel --> D[parseExcel]
+    C --> E[Data Cleaning & Validation]
+    D --> E
+    E --> F[Extract Column Metadata]
+    F --> G[Client Memory]
+    
+    subgraph AI Flows (Server Actions)
+        G --> H[recommendVisualizations]
+        G --> I[aiGeneratedDataInsights]
+        G --> J[naturalLanguageQuery]
+    end
+    
+    H --> K[Dashboard Grid]
+    I --> L[Insights Panel]
+    J --> M[Dynamic Chart]
+    
+    K --> N[Per-Chart Analysis]
+    L --> O[Executive Report]
+```
+
+- `src/ai/flows/`: Genkit server actions for AI logic.
+- `src/app/lib/`: Data processing, statistics, and validation utilities.
+- `src/components/dashboard/`: UI for charts, insights, and query bar.
+- `src/lib/`: Shared utilities (AI cache, prompt formatting, state).
 
 ### 🎨 UI/UX Features
 - **Instant Dashboard**: Zero-config visualization upon upload.
+- **Natural Language**: Query your data in plain English.
 - **Theme Intelligence**: Fully responsive dark and light modes.
-- **Raw Data Explorer**: A detailed table view for inspecting the processed records.
-- **Smart Insights Sidebar**: A dedicated panel for AI-generated finding and predictions.
+- **Raw Data Explorer**: Virtualized table for inspecting large datasets.
+- **Executive Reports**: One-click professional analysis export.
+

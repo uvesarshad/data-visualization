@@ -5,6 +5,8 @@ import {
   LayoutDashboard, Table as TableIcon, Settings, FileText, BrainCircuit,
   Sparkles, Database, Moon, Sun, LayoutGrid, Zap, ChevronRight, Search,
   BarChart3, RefreshCw, Download, FileBarChart, Activity, TrendingUp,
+  Command, PanelRightClose, PanelRight, Upload, ArrowUpRight,
+  Layers, GitBranch, Gauge, ChevronDown, X, Menu,
 } from 'lucide-react';
 import { DataUploader } from '@/components/upload/DataUploader';
 import { ChartPanel } from '@/components/dashboard/ChartPanel';
@@ -28,7 +30,6 @@ import { filterData } from '@/lib/filter-parser';
 import { truncateToTokenBudget } from '@/lib/token-budget';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -70,12 +71,21 @@ export default function DataSenseDashboard() {
 
   // Validation warnings
   const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
+
+  // Sidebar collapsed
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Active tab
+  const [activeTab, setActiveTab] = useState('visuals');
+
+  // Upload drag state
+  const [isDragOver, setIsDragOver] = useState(false);
   
   const { toast } = useToast();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
-  // 1.4: Cache metadata to avoid redundant O(n×c) extraction
+  // Cache metadata
   const cachedMetadataRef = useRef<ColumnMetadata[] | null>(null);
   const cachedMetadataJsonRef = useRef<string | null>(null);
 
@@ -83,7 +93,7 @@ export default function DataSenseDashboard() {
     setMounted(true);
   }, []);
 
-  // 2.6: Centralized stats computation — compute once for all numerical columns
+  // Centralized stats computation
   const columnStats = useMemo(() => {
     if (!data || data.length === 0) return {};
     const stats: Record<string, any> = {};
@@ -97,7 +107,7 @@ export default function DataSenseDashboard() {
     return stats;
   }, [data]);
 
-  // 2.5: Pre-slice data per chart recommendation
+  // Pre-slice data per chart recommendation
   const chartDataMap = useMemo(() => {
     if (!data || !recommendations) return new Map<number, any[]>();
     const map = new Map<number, any[]>();
@@ -111,7 +121,7 @@ export default function DataSenseDashboard() {
     return map;
   }, [data, recommendations]);
 
-  // 3.1: Filtered NL query data
+  // Filtered NL query data
   const nlQueryFilteredData = useMemo(() => {
     if (!data || !nlQueryChart?.filter) return data;
     const { data: filtered } = filterData(data, nlQueryChart.filter);
@@ -119,10 +129,7 @@ export default function DataSenseDashboard() {
   }, [data, nlQueryChart?.filter]);
 
   const handleDataLoaded = async (loadedData: any[], name: string) => {
-    // Clean data first
     const cleaned = cleanData(loadedData, { removeEmptyRows: true, trimStrings: true });
-    
-    // Validate
     const validation = validateData(cleaned);
     setValidationWarnings(validation.warnings);
     
@@ -136,12 +143,10 @@ export default function DataSenseDashboard() {
     setNlQueryResult(null);
     setReport(null);
 
-    // 1.4: Cache metadata on data load
     const metadata = extractMetadata(cleaned);
     cachedMetadataRef.current = metadata;
     cachedMetadataJsonRef.current = JSON.stringify(metadata);
 
-    // 3.2: Edge case guard — skip AI if insufficient data
     if (cleaned.length < 2) {
       setAnalysisError('Dataset has too few rows for meaningful AI analysis.');
       setIsProcessing(false);
@@ -149,7 +154,6 @@ export default function DataSenseDashboard() {
     }
 
     try {
-      // 2.3: Check cache for visualization recommendations
       const vizCacheKey = generateCacheKey('recommendVisualizations', { metadata: cachedMetadataJsonRef.current, rowCount: cleaned.length });
       let vizResult = getCachedResult<RecommendVisualizationsOutput>(vizCacheKey);
       
@@ -162,9 +166,7 @@ export default function DataSenseDashboard() {
         setCachedResult(vizCacheKey, vizResult);
       }
       setRecommendations(vizResult);
-
       generateInsights(cleaned, groundingEnabled);
-
     } catch (error) {
       console.error('Error processing data:', error);
       setAnalysisError('AI recommendations unavailable. Using auto-detection.');
@@ -180,7 +182,6 @@ export default function DataSenseDashboard() {
   };
 
   const generateInsights = async (dataset: any[], grounded: boolean) => {
-    // 3.2: Edge case guard
     if (dataset.length < 2) {
       setAnalysisError('Insufficient data for AI insights.');
       return;
@@ -189,12 +190,10 @@ export default function DataSenseDashboard() {
     setIsGeneratingInsights(true);
     setAnalysisError(null);
     try {
-      // 2.3: Check cache
       const cacheKey = generateCacheKey('aiGeneratedDataInsights', { dataHash: cachedMetadataJsonRef.current, grounded });
       let result = getCachedResult<AiGeneratedDataInsightsOutput>(cacheKey);
       
       if (!result) {
-        // 2.1: Use compact table format instead of JSON, 5.3: Token budget
         const sample = dataset.slice(0, 50);
         const compactData = dataToCompactTable(sample, 50);
         result = await aiGeneratedDataInsights({
@@ -221,8 +220,6 @@ export default function DataSenseDashboard() {
 
     try {
       const columnsUsed = [config.xAxis, config.yAxis, ...(config.extraSeries || [])];
-      
-      // 2.3: Check cache
       const cacheKey = generateCacheKey('perChartAnalysis', { chartTitle, chartType, columnsUsed });
       let result = getCachedResult<PerChartAnalysisOutput>(cacheKey);
       
@@ -230,7 +227,6 @@ export default function DataSenseDashboard() {
         const sample = chartData.slice(0, 10);
         const statsInfo: Record<string, any> = {};
         columnsUsed.forEach((col: string) => {
-          // 2.6: Reuse centralized stats
           if (columnStats[col]) {
             statsInfo[col] = columnStats[col];
           } else {
@@ -263,10 +259,7 @@ export default function DataSenseDashboard() {
     setNlQueryChart(null);
 
     try {
-      // 1.4: Reuse cached metadata
       const metadataJson = cachedMetadataJsonRef.current || JSON.stringify(extractMetadata(data));
-      
-      // 2.3: Check cache
       const cacheKey = generateCacheKey('naturalLanguageQuery', { query, metadataJson });
       let result = getCachedResult<NLQueryOutput>(cacheKey);
       
@@ -295,13 +288,8 @@ export default function DataSenseDashboard() {
     setReportLoading(true);
 
     try {
-      // 1.4: Reuse cached metadata
       const metadata = cachedMetadataRef.current || extractMetadata(data);
-      
-      // 2.1: Use compact format, 2.6: Reuse centralized stats, 5.3: Token budget
       const compactStats = statsToCompactFormat(columnStats);
-
-      // 2.3: Check cache
       const cacheKey = generateCacheKey('generateReport', { fileName, rowCount: data.length, insightsHash: insights?.insights?.substring(0, 100) });
       let result = getCachedResult<ReportGenerationOutput>(cacheKey);
       
@@ -352,238 +340,432 @@ export default function DataSenseDashboard() {
     setNlQueryResult(null);
     setReport(null);
     setValidationWarnings([]);
+    setActiveTab('visuals');
     cachedMetadataRef.current = null;
     cachedMetadataJsonRef.current = null;
-    // 2.3: Clear AI cache on data reset
     clearCache();
   };
 
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark');
 
+  const numericColumns = useMemo(() => {
+    if (!data) return 0;
+    return Object.keys(data[0]).filter(k => isNumericColumn(data, k)).length;
+  }, [data]);
+
+  // ============= LANDING PAGE =============
   if (!data) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-8">
-        <div className="mb-12 text-center space-y-4 animate-in fade-in zoom-in duration-700">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary mb-4 shadow-lg shadow-primary/20">
-            <Sparkles className="w-8 h-8 text-white" />
-          </div>
-          <h1 className="text-5xl font-headline font-bold text-foreground">DataSense</h1>
-          <p className="text-muted-foreground text-lg max-w-md mx-auto">
-            The AI engine that makes your data visual and actionable in seconds.
-          </p>
+      <div className="min-h-screen bg-background relative overflow-hidden">
+        {/* Background gradient mesh */}
+        <div className="fixed inset-0 pointer-events-none">
+          <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px]" />
+          <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-accent/5 rounded-full blur-[100px]" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-primary/3 rounded-full blur-[150px]" />
         </div>
-        <DataUploader onDataLoaded={handleDataLoaded} isLoading={isProcessing} />
-        
-        <div className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl w-full text-center px-4">
-          <div className="space-y-2 group p-4 rounded-xl hover:bg-card/50 transition-all">
-            <div className="text-primary flex justify-center"><LayoutGrid className="w-6 h-6" /></div>
-            <h3 className="font-headline font-semibold">20+ Chart Types</h3>
-            <p className="text-sm text-muted-foreground">Bar, Line, Treemap, Box Plot, Waterfall, Histogram, Gauge, Forecast & more.</p>
+
+        {/* Top nav */}
+        <header className="relative z-10 border-b border-border/40 bg-background/60 backdrop-blur-xl">
+          <div className="max-w-7xl mx-auto px-8 h-16 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-lg shadow-primary/20">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
+              <span className="font-headline font-bold text-lg tracking-tight">DataSense</span>
+              <Badge variant="secondary" className="text-[10px] font-medium bg-primary/10 text-primary border-primary/20 ml-1">v2.0</Badge>
+            </div>
+            <div className="flex items-center gap-3">
+              {mounted && (
+                <Button variant="ghost" size="icon" className="rounded-xl text-muted-foreground hover:text-foreground" onClick={toggleTheme}>
+                  {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                </Button>
+              )}
+            </div>
           </div>
-          <div className="space-y-2 group p-4 rounded-xl hover:bg-card/50 transition-all">
-            <div className="text-accent flex justify-center"><Zap className="w-6 h-6" /></div>
-            <h3 className="font-headline font-semibold">AI Natural Language</h3>
-            <p className="text-sm text-muted-foreground">Ask questions in plain English and get instant visualizations.</p>
+        </header>
+
+        {/* Hero section */}
+        <div className="relative z-10 max-w-7xl mx-auto px-8">
+          <div className="pt-24 pb-12 text-center space-y-8">
+            <div className="space-y-5 animate-in fade-in zoom-in-95 duration-700">
+              <Badge variant="outline" className="text-xs font-medium border-primary/30 text-primary bg-primary/5 px-4 py-1.5">
+                <Zap className="w-3 h-3 mr-1.5" />AI-Powered Analytics Platform
+              </Badge>
+              <h1 className="text-6xl md:text-7xl font-headline font-bold tracking-tight">
+                <span className="bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text">Transform Data</span>
+                <br />
+                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">Into Intelligence</span>
+              </h1>
+              <p className="text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+                Upload any dataset and instantly unlock AI-powered visualizations, natural language queries, 
+                and executive-ready insights — no configuration required.
+              </p>
+            </div>
+
+            {/* Upload area */}
+            <div className="max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
+              <DataUploader onDataLoaded={handleDataLoaded} isLoading={isProcessing} />
+            </div>
           </div>
-          <div className="space-y-2 group p-4 rounded-xl hover:bg-card/50 transition-all">
-            <div className="text-green-500 flex justify-center"><BrainCircuit className="w-6 h-6" /></div>
-            <h3 className="font-headline font-semibold">Full Analysis Report</h3>
-            <p className="text-sm text-muted-foreground">One-click AI-generated executive report with insights & predictions.</p>
+
+          {/* Feature cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto pb-24 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-300">
+            <Card className="p-6 border-border/50 bg-card/30 backdrop-blur-sm hover:bg-card/60 transition-all duration-300 group cursor-default">
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
+                <LayoutGrid className="w-6 h-6 text-primary" />
+              </div>
+              <h3 className="font-headline font-bold text-base mb-2">20+ Chart Types</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Bar, line, treemap, box plot, waterfall, histogram, gauge, forecast, scatter, radar, and more — auto-selected by AI.
+              </p>
+            </Card>
+            <Card className="p-6 border-border/50 bg-card/30 backdrop-blur-sm hover:bg-card/60 transition-all duration-300 group cursor-default">
+              <div className="w-12 h-12 rounded-2xl bg-accent/10 flex items-center justify-center mb-4 group-hover:bg-accent/20 transition-colors">
+                <BrainCircuit className="w-6 h-6 text-accent" />
+              </div>
+              <h3 className="font-headline font-bold text-base mb-2">Natural Language Queries</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Ask questions in plain English — &ldquo;show revenue by region&rdquo; — and get instant, interactive visualizations.
+              </p>
+            </Card>
+            <Card className="p-6 border-border/50 bg-card/30 backdrop-blur-sm hover:bg-card/60 transition-all duration-300 group cursor-default">
+              <div className="w-12 h-12 rounded-2xl bg-green-500/10 flex items-center justify-center mb-4 group-hover:bg-green-500/20 transition-colors">
+                <FileBarChart className="w-6 h-6 text-green-500" />
+              </div>
+              <h3 className="font-headline font-bold text-base mb-2">Executive Reports</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                One-click AI-generated analysis with key findings, predictions, and data quality assessment.
+              </p>
+            </Card>
           </div>
         </div>
-        {mounted && (
-          <Button variant="outline" size="icon" className="fixed bottom-8 right-8 rounded-full bg-card shadow-lg" onClick={toggleTheme}>
-            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          </Button>
-        )}
       </div>
     );
   }
 
+  // ============= DASHBOARD =============
+  const hasNLChart = nlQueryChart && data;
+  const chartCount = recommendations?.recommendations.length || 0;
+
   return (
     <div className="flex h-screen bg-background overflow-hidden">
-      {/* Sidebar */}
-      <aside className="w-16 border-r border-border bg-card/20 flex flex-col items-center py-6 gap-8 z-20">
-        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/20">
-          <Sparkles className="w-6 h-6 text-white" />
-        </div>
-        <div className="flex flex-col gap-4">
-          <Button variant="ghost" size="icon" className="text-primary bg-primary/10 rounded-xl"><LayoutDashboard className="w-5 h-5" /></Button>
-          <Button variant="ghost" size="icon" className="text-muted-foreground rounded-xl" onClick={() => setShowProfiler(!showProfiler)}><Activity className="w-5 h-5" /></Button>
-          <Separator className="bg-border" />
-          <Button variant="ghost" size="icon" className="text-muted-foreground rounded-xl" onClick={handleExportData} title="Export CSV"><Download className="w-5 h-5" /></Button>
-          <Button variant="ghost" size="icon" className="text-muted-foreground rounded-xl" onClick={handleGenerateReport} title="Generate Report"><FileBarChart className="w-5 h-5" /></Button>
-          <Button variant="ghost" size="icon" className="text-muted-foreground rounded-xl" onClick={resetData}><Database className="w-5 h-5" /></Button>
-        </div>
-        <div className="mt-auto flex flex-col gap-4">
-          {mounted && (
-            <Button variant="ghost" size="icon" className="text-muted-foreground rounded-xl" onClick={toggleTheme}>
-              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </Button>
+      {/* Collapsible Sidebar */}
+      <aside className={cn(
+        "border-r border-border/60 bg-card/30 backdrop-blur-xl flex flex-col z-30 transition-all duration-300 ease-in-out",
+        sidebarCollapsed ? "w-[60px]" : "w-[240px]"
+      )}>
+        {/* Brand */}
+        <div className={cn("h-16 border-b border-border/40 flex items-center px-4 gap-3", sidebarCollapsed && "justify-center")}>
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-lg shadow-primary/20 shrink-0">
+            <Sparkles className="w-5 h-5 text-white" />
+          </div>
+          {!sidebarCollapsed && (
+            <div className="min-w-0">
+              <h1 className="font-headline font-bold text-sm tracking-tight truncate">DataSense</h1>
+              <p className="text-[10px] text-muted-foreground truncate">Analytics Platform</p>
+            </div>
           )}
-          <Button variant="ghost" size="icon" className="text-muted-foreground rounded-xl"><Settings className="w-5 h-5" /></Button>
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
+          {!sidebarCollapsed && (
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold px-3 mb-3">Navigation</p>
+          )}
+          
+          <button
+            onClick={() => { setActiveTab('visuals'); }}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
+              activeTab === 'visuals' 
+                ? "bg-primary/10 text-primary shadow-sm" 
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            )}
+            title="Dashboard"
+          >
+            <LayoutDashboard className="w-[18px] h-[18px] shrink-0" />
+            {!sidebarCollapsed && <span>Dashboard</span>}
+          </button>
+
+
+          <button
+            onClick={() => setShowProfiler(!showProfiler)}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
+              showProfiler 
+                ? "bg-primary/10 text-primary shadow-sm" 
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            )}
+            title="Data Profiler"
+          >
+            <Activity className="w-[18px] h-[18px] shrink-0" />
+            {!sidebarCollapsed && <span>Data Profiler</span>}
+          </button>
+
+          {!sidebarCollapsed && (
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold px-3 mb-3 mt-6">Actions</p>
+          )}
+          {sidebarCollapsed && <Separator className="my-3" />}
+
+          <button
+            onClick={handleGenerateReport}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+            title="Generate Report"
+          >
+            <FileBarChart className="w-[18px] h-[18px] shrink-0" />
+            {!sidebarCollapsed && <span>Generate Report</span>}
+          </button>
+
+          <button
+            onClick={handleExportData}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+            title="Export CSV"
+          >
+            <Download className="w-[18px] h-[18px] shrink-0" />
+            {!sidebarCollapsed && <span>Export CSV</span>}
+          </button>
+
+          <button
+            onClick={resetData}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+            title="New Dataset"
+          >
+            <Upload className="w-[18px] h-[18px] shrink-0" />
+            {!sidebarCollapsed && <span>New Dataset</span>}
+          </button>
+        </nav>
+
+        {/* Bottom controls */}
+        <div className="p-3 border-t border-border/40 space-y-1">
+          {mounted && (
+            <button
+              onClick={toggleTheme}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+              title="Toggle Theme"
+            >
+              {theme === 'dark' ? <Sun className="w-[18px] h-[18px] shrink-0" /> : <Moon className="w-[18px] h-[18px] shrink-0" />}
+              {!sidebarCollapsed && <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
+            </button>
+          )}
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+            title={sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+          >
+            {sidebarCollapsed ? <PanelRight className="w-[18px] h-[18px] shrink-0" /> : <PanelRightClose className="w-[18px] h-[18px] shrink-0" />}
+            {!sidebarCollapsed && <span>Collapse</span>}
+          </button>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 bg-background/30 relative">
-        <header className="h-16 border-b border-border flex items-center justify-between px-8 bg-card/10 backdrop-blur-md sticky top-0 z-10">
-          <div className="flex items-center gap-4">
-            <h2 className="font-headline font-bold text-xl">Intelligence Dashboard</h2>
-            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-            <Badge variant="secondary" className="bg-primary/5 text-primary border-primary/20 font-medium">
-              <FileText className="w-3 h-3 mr-2" />{fileName}
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col min-w-0 relative">
+        {/* Top Header Bar */}
+        <header className="h-16 border-b border-border/60 flex items-center justify-between px-6 bg-card/20 backdrop-blur-xl sticky top-0 z-20">
+          <div className="flex items-center gap-3 min-w-0">
+            <h2 className="font-headline font-bold text-lg tracking-tight shrink-0">Intelligence Dashboard</h2>
+            <Separator orientation="vertical" className="h-5 mx-1" />
+            <Badge variant="secondary" className="bg-muted/50 text-xs font-medium gap-1.5 shrink-0">
+              <FileText className="w-3 h-3" />
+              {fileName}
             </Badge>
             {recommendations && (
-              <Badge variant="secondary" className="bg-accent/10 text-accent border-accent/20 font-medium text-[10px]">
-                <BarChart3 className="w-3 h-3 mr-1" />{recommendations.recommendations.length} Charts
+              <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20 text-xs font-medium gap-1 shrink-0">
+                <BarChart3 className="w-3 h-3" />
+                {chartCount} Charts
               </Badge>
             )}
-            {/* 3.1: Show active NL filter */}
+            {data && (
+              <Badge variant="outline" className="text-xs text-muted-foreground shrink-0">
+                {data.length.toLocaleString()} rows &middot; {Object.keys(data[0]).length} cols
+              </Badge>
+            )}
             {nlQueryChart?.filter && (
-              <Badge variant="outline" className="text-[10px] gap-1">
-                <Search className="w-2.5 h-2.5" />
-                Filter: {nlQueryChart.filter}
+              <Badge variant="outline" className="text-xs gap-1 shrink-0 border-accent/30 text-accent bg-accent/5">
+                <Search className="w-3 h-3" />
+                {nlQueryChart.filter}
                 <button 
-                  className="ml-1 hover:text-destructive" 
+                  className="ml-1 hover:text-destructive transition-colors" 
                   onClick={() => { setNlQueryChart(null); setNlQueryResult(null); }}
                 >
-                  ×
+                  <X className="w-3 h-3" />
                 </button>
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-3">
-            <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={handleGenerateReport}>
-              <FileBarChart className="w-3.5 h-3.5" />Generate Report
+          <div className="flex items-center gap-2 shrink-0">
+            <Button size="sm" variant="outline" className="gap-1.5 text-xs font-medium h-8" onClick={handleGenerateReport}>
+              <FileBarChart className="w-3.5 h-3.5" />Report
             </Button>
-            <Button size="sm" className="bg-accent hover:bg-accent/80 text-white shadow-lg shadow-accent/20 gap-1.5" onClick={handleExportData}>
+            <Button size="sm" className="gap-1.5 text-xs font-medium h-8 shadow-md shadow-primary/20" onClick={handleExportData}>
               <Download className="w-3.5 h-3.5" />Export
             </Button>
           </div>
         </header>
 
-        <ScrollArea className="flex-1">
-          <div className="p-8">
-            {/* Validation Warnings */}
-            {validationWarnings.length > 0 && (
-              <div className="mb-4 p-3 bg-yellow-500/5 border border-yellow-500/20 rounded-xl">
-                <p className="text-[10px] uppercase tracking-widest text-yellow-600 font-bold mb-1">Data Warnings</p>
-                {validationWarnings.slice(0, 3).map((w, i) => (
-                  <p key={i} className="text-xs text-foreground/70">• {w}</p>
-                ))}
-              </div>
-            )}
-
-            {/* Stats Overview */}
-            <div className="mb-6">
-              <StatsOverview data={data} />
-            </div>
-
-            {/* NL Query Bar */}
-            <div className="mb-6">
-              <NLQueryBar onSubmit={handleNLQuery} isLoading={nlQueryLoading} result={nlQueryResult} onClearResult={() => { setNlQueryResult(null); setNlQueryChart(null); }} />
-            </div>
-
-            {/* NL Query Generated Chart — 3.1: Uses filtered data */}
-            {nlQueryChart && data && (
-              <div className="mb-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <ChartPanel
-                  type={nlQueryChart.chartType}
-                  data={nlQueryFilteredData || data}
-                  title={nlQueryChart.title}
-                  description={nlQueryChart.explanation + (nlQueryChart.filter ? ` (Filtered: ${nlQueryChart.filter}, ${nlQueryFilteredData?.length} rows)` : '')}
-                  config={{ xAxis: nlQueryChart.xAxis, yAxis: nlQueryChart.yAxis, extraSeries: nlQueryChart.extraSeries }}
-                  onAnalyze={handleChartAnalysis}
-                  precomputedStats={columnStats}
-                />
-              </div>
-            )}
-
-            {/* Data Profiler */}
-            {showProfiler && (
-              <div className="mb-6">
-                <DataProfiler data={data} open={showProfiler} onClose={() => setShowProfiler(false)} />
-              </div>
-            )}
-
-            <Tabs defaultValue="visuals" className="w-full">
-              <div className="flex items-center justify-between mb-6">
-                <TabsList className="bg-card/50 border border-border p-1">
-                  <TabsTrigger value="visuals" className="gap-2 px-6 data-[state=active]:bg-primary data-[state=active]:text-white">
-                    <LayoutDashboard className="w-4 h-4" />Dashboards
-                  </TabsTrigger>
-                  <TabsTrigger value="raw" className="gap-2 px-6 data-[state=active]:bg-primary data-[state=active]:text-white">
-                    <TableIcon className="w-4 h-4" />Explorer
-                  </TabsTrigger>
-                </TabsList>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold">
-                  <span className="text-primary">{data.length.toLocaleString()}</span> Records processed
-                </p>
-              </div>
-
-              <TabsContent value="visuals" className="m-0 space-y-6">
-                {isProcessing ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {[1, 2, 3, 4, 5, 6].map(i => (
-                      <div key={i} className="h-[280px] bg-card/20 rounded-2xl animate-pulse flex items-center justify-center border border-border/30">
-                        <Sparkles className="w-6 h-6 text-primary/10" />
-                      </div>
+        {/* Content */}
+        <div className="flex-1 flex overflow-hidden">
+          <ScrollArea className="flex-1">
+            <div className="p-6 space-y-6">
+              {/* Validation Warnings */}
+              {validationWarnings.length > 0 && (
+                <div className="p-4 bg-yellow-500/5 border border-yellow-500/20 rounded-2xl flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-yellow-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <Zap className="w-4 h-4 text-yellow-500" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold uppercase tracking-wider text-yellow-600 mb-1">Data Quality Warnings</p>
+                    {validationWarnings.slice(0, 3).map((w, i) => (
+                      <p key={i} className="text-xs text-foreground/70 leading-relaxed">• {w}</p>
                     ))}
                   </div>
-                ) : recommendations ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    {recommendations.recommendations.map((rec, idx) => {
-                      const xAxis = rec.columnsUsed[0];
-                      const yAxis = rec.columnsUsed[1] || rec.columnsUsed[0];
-                      const extraSeries = rec.columnsUsed.slice(2);
-                      // 2.5: Use pre-sliced data instead of full dataset
-                      const chartData = chartDataMap.get(idx) || data;
-                      return (
-                        <div key={idx} className={cn(idx === 0 ? "xl:col-span-2" : "col-span-1")}>
-                          <ChartPanel 
-                            type={rec.type}
-                            data={chartData}
-                            title={rec.title}
-                            description={rec.explanation}
-                            config={{ xAxis, yAxis, extraSeries }}
-                            onAnalyze={handleChartAnalysis}
-                            precomputedStats={columnStats}
-                          />
-                        </div>
-                      );
-                    })}
+                </div>
+              )}
+
+              {/* Stats Overview */}
+              <StatsOverview data={data} />
+
+              {/* NL Query Bar */}
+              <NLQueryBar onSubmit={handleNLQuery} isLoading={nlQueryLoading} result={nlQueryResult} onClearResult={() => { setNlQueryResult(null); setNlQueryChart(null); }} />
+
+              {/* NL Query Generated Chart */}
+              {hasNLChart && (
+                <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <ChartPanel
+                    type={nlQueryChart.chartType}
+                    data={nlQueryFilteredData || data}
+                    title={nlQueryChart.title}
+                    description={nlQueryChart.explanation + (nlQueryChart.filter ? ` (Filtered: ${nlQueryChart.filter}, ${nlQueryFilteredData?.length} rows)` : '')}
+                    config={{ xAxis: nlQueryChart.xAxis, yAxis: nlQueryChart.yAxis, extraSeries: nlQueryChart.extraSeries }}
+                    onAnalyze={handleChartAnalysis}
+                    precomputedStats={columnStats}
+                  />
+                </div>
+              )}
+
+              {/* Data Profiler */}
+              {showProfiler && (
+                <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <DataProfiler data={data} open={showProfiler} onClose={() => setShowProfiler(false)} />
+                </div>
+              )}
+
+              {/* Main Tabs */}
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1 bg-muted/30 p-1 rounded-2xl border border-border/40">
+                    <button
+                      onClick={() => setActiveTab('visuals')}
+                      className={cn(
+                        "flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-medium transition-all duration-200",
+                        activeTab === 'visuals'
+                          ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <LayoutDashboard className="w-4 h-4" />
+                      Dashboard
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('raw')}
+                      className={cn(
+                        "flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-medium transition-all duration-200",
+                        activeTab === 'raw'
+                          ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <TableIcon className="w-4 h-4" />
+                      Explorer
+                    </button>
                   </div>
-                ) : (
-                  <div className="text-center py-24 bg-card/5 rounded-2xl border border-dashed border-border/50">
-                    <BarChart3 className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-30" />
-                    <h3 className="text-lg font-headline font-semibold">No AI Recommendations</h3>
-                    <p className="text-xs text-muted-foreground mt-2">AI recommendation service is unavailable.</p>
+                  {recommendations && (
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>{chartCount} visualizations generated</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Charts Tab */}
+                {activeTab === 'visuals' && (
+                  <div className="space-y-6">
+                    {isProcessing ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                        {[1, 2, 3, 4, 5, 6].map(i => (
+                          <div key={i} className="h-[300px] bg-card/30 rounded-2xl animate-pulse flex items-center justify-center border border-border/30">
+                            <div className="flex flex-col items-center gap-2">
+                              <Sparkles className="w-6 h-6 text-primary/20" />
+                              <span className="text-xs text-muted-foreground/40">Loading chart...</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : recommendations ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                        {recommendations.recommendations.map((rec, idx) => {
+                          const xAxis = rec.columnsUsed[0];
+                          const yAxis = rec.columnsUsed[1] || rec.columnsUsed[0];
+                          const extraSeries = rec.columnsUsed.slice(2);
+                          const chartData = chartDataMap.get(idx) || data;
+                          return (
+                            <div key={idx} className={cn(
+                              idx === 0 ? "xl:col-span-2" : "col-span-1",
+                              "min-h-[320px]"
+                            )}>
+                              <ChartPanel 
+                                type={rec.type}
+                                data={chartData}
+                                title={rec.title}
+                                description={rec.explanation}
+                                config={{ xAxis, yAxis, extraSeries }}
+                                onAnalyze={handleChartAnalysis}
+                                precomputedStats={columnStats}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <Card className="text-center py-20 border-dashed border-border/40 bg-card/10">
+                        <BarChart3 className="w-14 h-14 text-muted-foreground/20 mx-auto mb-4" />
+                        <h3 className="text-lg font-headline font-bold text-foreground/60">No AI Recommendations</h3>
+                        <p className="text-sm text-muted-foreground mt-2 max-w-md mx-auto">The AI recommendation service is unavailable. Try uploading a different dataset or check your connection.</p>
+                      </Card>
+                    )}
                   </div>
                 )}
-              </TabsContent>
 
-              <TabsContent value="raw" className="m-0">
-                <VirtualizedTable data={data} columns={Object.keys(data[0])} maxRows={1000} />
-              </TabsContent>
-            </Tabs>
-          </div>
-        </ScrollArea>
+                {/* Explorer Tab */}
+                {activeTab === 'raw' && (
+                  <div className="animate-in fade-in duration-200">
+                    <VirtualizedTable data={data} columns={Object.keys(data[0])} maxRows={1000} />
+                  </div>
+                )}
+              </div>
+            </div>
+          </ScrollArea>
+
+          {/* Insights Sidebar */}
+          <aside className={cn(
+            "border-l border-border/60 bg-card/10 backdrop-blur-2xl z-20 flex flex-col transition-all duration-300 ease-in-out",
+            "w-[380px]"
+          )}>
+            <InsightsPanel 
+              insights={insights?.insights}
+              findings={insights?.keyFindings}
+              predictions={insights?.predictions}
+              isLoading={isGeneratingInsights}
+              groundingEnabled={groundingEnabled}
+              onGroundingToggle={(enabled) => { setGroundingEnabled(enabled); generateInsights(data, enabled); }}
+              onRefresh={() => generateInsights(data, groundingEnabled)}
+              analysisError={analysisError}
+            />
+          </aside>
+        </div>
       </main>
-
-      {/* Insights Panel */}
-      <aside className="w-[380px] border-l border-border bg-card/10 backdrop-blur-2xl z-20 flex flex-col">
-        <InsightsPanel 
-          insights={insights?.insights}
-          findings={insights?.keyFindings}
-          predictions={insights?.predictions}
-          isLoading={isGeneratingInsights}
-          groundingEnabled={groundingEnabled}
-          onGroundingToggle={(enabled) => { setGroundingEnabled(enabled); generateInsights(data, enabled); }}
-          onRefresh={() => generateInsights(data, groundingEnabled)}
-          analysisError={analysisError}
-        />
-      </aside>
 
       {/* Dialogs */}
       <ChartAnalysisDialog open={chartAnalysisOpen} onOpenChange={setChartAnalysisOpen} analysis={chartAnalysis} chartTitle={chartAnalysisTitle} chartType={chartAnalysisType} isLoading={chartAnalysisLoading} />

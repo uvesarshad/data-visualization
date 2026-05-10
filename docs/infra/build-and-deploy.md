@@ -29,7 +29,7 @@ AGENT NOTE: The `ignoreBuildErrors` and `ignoreDuringBuilds` flags have been rem
 
 ## Deployment Target
 
-[PLACEHOLDER: No deployment configuration exists. The project appears to be in local development only.]
+The project is currently configured for local development only. No deployment target (e.g., Vercel, Netlify) has been configured.
 
 ## Key Dependencies
 
@@ -40,8 +40,8 @@ AGENT NOTE: The `ignoreBuildErrors` and `ignoreDuringBuilds` flags have been rem
 | genkit | 1.28.0 | AI framework |
 | @genkit-ai/google-genai | 1.28.0 | Google AI plugin |
 | recharts | 2.15.1 | Chart library |
-| zustand | [version in package.json] | State management |
-| @tanstack/react-virtual | [version in package.json] | Table virtualization |
+| zustand | 5.0.13 | State management |
+| @tanstack/react-virtual | 3.13.24 | Table virtualization |
 | xlsx | 0.18.5 | Excel parsing (dynamically imported) |
 | zod | 3.24.2 | Schema validation |
 

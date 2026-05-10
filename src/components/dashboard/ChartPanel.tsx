@@ -7,7 +7,6 @@ import { ChartContainer } from '@/components/ui/chart';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { BrainCircuit, Loader2 } from 'lucide-react';
-import { ResponsiveContainer } from 'recharts';
 import { prepareChartData, computeStats, isNumericColumn } from '@/app/lib/chart-utils';
 import { ChartSkeleton } from './ChartSkeleton';
 
@@ -102,68 +101,68 @@ export function ChartPanel({ type, data, title, description, config, onAnalyze, 
   };
 
   return (
-    <Card className="h-full border border-border/50 shadow-md bg-card/40 backdrop-blur-sm overflow-hidden flex flex-col group hover:shadow-lg hover:shadow-primary/5 transition-all">
+    <Card className="h-full border border-border/40 bg-card/30 backdrop-blur-sm overflow-hidden flex flex-col group hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200 rounded-2xl">
       <CardHeader className="p-4 pb-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <CardTitle className="text-sm font-headline font-bold text-primary group-hover:text-accent transition-colors truncate">
+            <CardTitle className="text-sm font-headline font-bold tracking-tight text-foreground/90 group-hover:text-primary transition-colors truncate">
               {title}
             </CardTitle>
             {description && (
-              <CardDescription className="text-[10px] leading-tight line-clamp-1 opacity-70 mt-0.5">
+              <CardDescription className="text-[11px] leading-relaxed line-clamp-1 opacity-60 mt-0.5">
                 {description}
               </CardDescription>
             )}
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            <Badge variant="secondary" className="text-[8px] uppercase tracking-widest font-bold px-1.5 py-0.5 bg-muted/50">
+            <Badge variant="secondary" className="text-[9px] uppercase tracking-wider font-semibold px-2 py-0.5 bg-muted/40 border border-border/30">
               {type.replace(/_/g, ' ')}
             </Badge>
             {onAnalyze && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 text-muted-foreground hover:text-primary"
+                className="h-7 w-7 text-muted-foreground hover:text-primary rounded-lg"
                 onClick={handleAnalyze}
                 disabled={isAnalyzing}
                 title="AI Analysis"
               >
                 {isAnalyzing ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
-                  <BrainCircuit className="w-3 h-3" />
+                  <BrainCircuit className="w-3.5 h-3.5" />
                 )}
               </Button>
             )}
           </div>
         </div>
         {stats && (
-          <div className="flex items-center gap-3 mt-1">
-            <span className="text-[9px] text-muted-foreground">
-              Min: <span className="font-bold text-foreground">{stats.min.toLocaleString()}</span>
+          <div className="flex items-center gap-3 mt-1.5">
+            <span className="text-[10px] text-muted-foreground">
+              Min <span className="font-semibold text-foreground/80">{stats.min.toLocaleString()}</span>
             </span>
-            <span className="text-[9px] text-muted-foreground">
-              Avg: <span className="font-bold text-foreground">{stats.mean.toLocaleString()}</span>
+            <span className="w-0.5 h-0.5 rounded-full bg-border" />
+            <span className="text-[10px] text-muted-foreground">
+              Avg <span className="font-semibold text-foreground/80">{stats.mean.toLocaleString()}</span>
             </span>
-            <span className="text-[9px] text-muted-foreground">
-              Max: <span className="font-bold text-foreground">{stats.max.toLocaleString()}</span>
+            <span className="w-0.5 h-0.5 rounded-full bg-border" />
+            <span className="text-[10px] text-muted-foreground">
+              Max <span className="font-semibold text-foreground/80">{stats.max.toLocaleString()}</span>
             </span>
           </div>
         )}
       </CardHeader>
-      <CardContent className="flex-1 min-h-[220px] p-2 relative">
-        <ChartContainer config={chartConfig} className="w-full h-full absolute inset-0">
-          <ResponsiveContainer width="100%" height="100%">
-            <ChartRenderer
-              type={type}
-              chartData={chartData}
-              config={config}
-              stats={stats}
-              isValid={isValid}
-              errorMessage={errorMessage}
-              rawData={data}
-            />
-          </ResponsiveContainer>
+      <CardContent className="flex-1 min-h-[220px] p-3 pt-0 relative">
+        <ChartContainer config={chartConfig} className="w-full h-full absolute inset-0 p-3 pt-0">
+          <ChartRenderer
+            type={type}
+            chartData={chartData}
+            config={config}
+            stats={stats}
+            isValid={isValid}
+            errorMessage={errorMessage}
+            rawData={data}
+          />
         </ChartContainer>
       </CardContent>
     </Card>

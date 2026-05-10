@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { 
   TrendingUp, 
@@ -9,24 +9,15 @@ import {
   BarChart3, 
   Hash, 
   Type, 
-  Percent,
   ArrowUpRight,
   ArrowDownRight,
   Minus,
+  Layers,
 } from 'lucide-react';
 import { computeStats, isNumericColumn, getUniqueValues } from '@/app/lib/chart-utils';
 
 interface StatsOverviewProps {
   data: Record<string, any>[];
-}
-
-interface StatCard {
-  label: string;
-  value: string;
-  subValue?: string;
-  icon: React.ReactNode;
-  trend?: 'up' | 'down' | 'neutral';
-  color: string;
 }
 
 export function StatsOverview({ data }: StatsOverviewProps) {
@@ -37,11 +28,9 @@ export function StatsOverview({ data }: StatsOverviewProps) {
     const numericColumns = columns.filter(col => isNumericColumn(data, col));
     const categoricalColumns = columns.filter(col => !isNumericColumn(data, col));
 
-    // Find the primary numeric column (first one)
     const primaryNumeric = numericColumns[0];
     const primaryStats = primaryNumeric ? computeStats(data, primaryNumeric) : null;
 
-    // Find trends: compare first half vs second half
     let trend: 'up' | 'down' | 'neutral' = 'neutral';
     let trendPct = 0;
     if (primaryNumeric && data.length >= 10) {
@@ -56,121 +45,119 @@ export function StatsOverview({ data }: StatsOverviewProps) {
       }
     }
 
-    // Find min/max columns for secondary stats
-    const secondNumeric = numericColumns[1];
-    const secondStats = secondNumeric ? computeStats(data, secondNumeric) : null;
-
-    const cards: StatCard[] = [
-      {
-        label: 'Total Records',
-        value: data.length.toLocaleString(),
-        subValue: `${columns.length} columns`,
-        icon: <Hash className="w-4 h-4" />,
-        color: 'text-blue-500',
-      },
-      {
-        label: 'Numeric Columns',
-        value: numericColumns.length.toString(),
-        subValue: `${categoricalColumns.length} categorical`,
-        icon: <BarChart3 className="w-4 h-4" />,
-        color: 'text-purple-500',
-      },
-    ];
-
-    if (primaryStats) {
-      cards.push({
-        label: `${primaryNumeric} (Sum)`,
-        value: primaryStats.sum >= 1000000 
-          ? `${(primaryStats.sum / 1000000).toFixed(1)}M` 
-          : primaryStats.sum >= 1000 
-          ? `${(primaryStats.sum / 1000).toFixed(1)}K` 
-          : primaryStats.sum.toLocaleString(),
-        subValue: `Avg: ${primaryStats.mean.toLocaleString()}`,
-        icon: trend === 'up' ? <TrendingUp className="w-4 h-4" /> : trend === 'down' ? <TrendingDown className="w-4 h-4" /> : <Minus className="w-4 h-4" />,
-        trend,
-        color: trend === 'up' ? 'text-green-500' : trend === 'down' ? 'text-red-500' : 'text-yellow-500',
-      });
-
-      cards.push({
-        label: `${primaryNumeric} Range`,
-        value: `${primaryStats.min.toLocaleString()} - ${primaryStats.max.toLocaleString()}`,
-        subValue: `StdDev: ${primaryStats.stdDev.toLocaleString()}`,
-        icon: <Percent className="w-4 h-4" />,
-        color: 'text-cyan-500',
-      });
-    }
-
-    if (secondStats) {
-      cards.push({
-        label: `${secondNumeric} (Avg)`,
-        value: secondStats.mean.toLocaleString(),
-        subValue: `Median: ${secondStats.median.toLocaleString()}`,
-        icon: <ArrowUpRight className="w-4 h-4" />,
-        color: 'text-orange-500',
-      });
-    }
-
-    // Top categorical column info
-    if (categoricalColumns.length > 0) {
-      const catCol = categoricalColumns[0];
-      const uniqueVals = getUniqueValues(data, catCol);
-      cards.push({
-        label: `Unique ${catCol}`,
-        value: uniqueVals.length.toString(),
-        subValue: uniqueVals.slice(0, 3).join(', ') + (uniqueVals.length > 3 ? '...' : ''),
-        icon: <Type className="w-4 h-4" />,
-        color: 'text-pink-500',
-      });
-    }
-
-    if (trendPct !== 0) {
-      cards.push({
-        label: 'Trend',
-        value: `${trendPct > 0 ? '+' : ''}${trendPct}%`,
-        subValue: `${primaryNumeric} (2nd half vs 1st half)`,
-        icon: trend === 'up' ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />,
-        trend,
-        color: trend === 'up' ? 'text-green-500' : 'text-red-500',
-      });
-    }
-
-    return cards;
+    return {
+      records: data.length,
+      columns: columns.length,
+      numericCols: numericColumns.length,
+      categoricalCols: categoricalColumns.length,
+      primaryNumeric,
+      primaryStats,
+      trend,
+      trendPct,
+      uniqueCategories: categoricalColumns.length > 0 ? getUniqueValues(data, categoricalColumns[0]).length : 0,
+      topCategory: categoricalColumns[0] || null,
+    };
   }, [data]);
 
   if (!stats) return null;
 
+  const StatCard = ({ 
+    icon, 
+    iconBg, 
+    label, 
+    value, 
+    detail,
+    trend,
+    trendPct,
+  }: { 
+    icon: React.ReactNode; 
+    iconBg: string;
+    label: string; 
+    value: string; 
+    detail?: string;
+    trend?: 'up' | 'down' | 'neutral';
+    trendPct?: number;
+  }) => (
+    <Card className="bg-card/40 backdrop-blur-sm border border-border/40 hover:border-primary/30 hover:shadow-md hover:shadow-primary/5 transition-all duration-200 group">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between mb-3">
+          <div className={`w-9 h-9 rounded-xl ${iconBg} flex items-center justify-center group-hover:scale-105 transition-transform`}>
+            {icon}
+          </div>
+          {trend && trend !== 'neutral' && trendPct !== undefined && (
+            <Badge 
+              variant="secondary" 
+              className={`text-[10px] font-medium px-2 py-0.5 ${
+                trend === 'up' ? 'bg-green-500/10 text-green-500 border-green-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'
+              }`}
+            >
+              {trend === 'up' ? '↑' : '↓'} {Math.abs(trendPct)}%
+            </Badge>
+          )}
+        </div>
+        <p className="text-[11px] uppercase tracking-wider text-muted-foreground/70 font-medium mb-1">{label}</p>
+        <p className="text-xl font-headline font-bold text-foreground tracking-tight">{value}</p>
+        {detail && (
+          <p className="text-[11px] text-muted-foreground mt-1.5 truncate">{detail}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  const formatNum = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return n.toLocaleString();
+  };
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
-      {stats.map((card, idx) => (
-        <Card key={idx} className="bg-card/40 backdrop-blur-sm border border-border/50 hover:border-primary/30 transition-all">
-          <CardContent className="p-3">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[9px] uppercase tracking-widest text-muted-foreground font-bold truncate">
-                {card.label}
-              </span>
-              <span className={card.color}>{card.icon}</span>
-            </div>
-            <p className="text-lg font-headline font-bold text-foreground truncate">
-              {card.value}
-            </p>
-            {card.subValue && (
-              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                {card.subValue}
-              </p>
-            )}
-            {card.trend && card.trend !== 'neutral' && (
-              <Badge 
-                variant="secondary" 
-                className={`mt-1 text-[8px] ${
-                  card.trend === 'up' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
-                }`}
-              >
-                {card.trend === 'up' ? '↑' : '↓'} Trend
-              </Badge>
-            )}
-          </CardContent>
-        </Card>
-      ))}
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+      <StatCard
+        icon={<Hash className="w-4 h-4 text-blue-500" />}
+        iconBg="bg-blue-500/10"
+        label="Total Records"
+        value={stats.records.toLocaleString()}
+        detail={`${stats.columns} columns`}
+      />
+      <StatCard
+        icon={<BarChart3 className="w-4 h-4 text-violet-500" />}
+        iconBg="bg-violet-500/10"
+        label="Numeric Columns"
+        value={stats.numericCols.toString()}
+        detail={`${stats.categoricalCols} categorical`}
+      />
+      {stats.primaryStats && (
+        <StatCard
+          icon={stats.trend === 'up' 
+            ? <TrendingUp className="w-4 h-4 text-green-500" /> 
+            : stats.trend === 'down' 
+              ? <TrendingDown className="w-4 h-4 text-red-500" /> 
+              : <Minus className="w-4 h-4 text-amber-500" />}
+          iconBg={stats.trend === 'up' ? 'bg-green-500/10' : stats.trend === 'down' ? 'bg-red-500/10' : 'bg-amber-500/10'}
+          label={`${stats.primaryNumeric} Sum`}
+          value={formatNum(stats.primaryStats.sum)}
+          detail={`Avg: ${formatNum(stats.primaryStats.mean)} · Range: ${formatNum(stats.primaryStats.min)}–${formatNum(stats.primaryStats.max)}`}
+          trend={stats.trend}
+          trendPct={stats.trendPct}
+        />
+      )}
+      {stats.primaryStats && (
+        <StatCard
+          icon={<Layers className="w-4 h-4 text-cyan-500" />}
+          iconBg="bg-cyan-500/10"
+          label="Std Deviation"
+          value={formatNum(stats.primaryStats.stdDev)}
+          detail={`Median: ${formatNum(stats.primaryStats.median)}`}
+        />
+      )}
+      {stats.topCategory && (
+        <StatCard
+          icon={<Type className="w-4 h-4 text-pink-500" />}
+          iconBg="bg-pink-500/10"
+          label={`Unique ${stats.topCategory}`}
+          value={stats.uniqueCategories.toString()}
+        />
+      )}
     </div>
   );
 }

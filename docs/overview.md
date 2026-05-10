@@ -29,12 +29,12 @@ DataSense is an AI-powered data visualization dashboard built with Next.js App R
 
 ## Environment
 
-- **Node:** [PLACEHOLDER: check with `node -v`]
+- **Node:** v24.12.0
 - **Next.js:** 15.5.9
-- **Deployment target:** Not configured (local development only)
+- **Deployment target:** Local development (not configured)
 - **Required env vars:** `GOOGLE_GENAI_API_KEY` (server-only, for Gemini)
 
-AGENT NOTE: This project has no database, no authentication, no middleware, and no API routes. All data lives in client memory. The only server-side code is the 6 Genkit AI flows.
+AGENT NOTE: This project has no database, no authentication, no middleware, and no API routes. All data lives in client memory. The only server-side code is the 7 Genkit AI flows.
 
 ## Directory Map
 
@@ -59,7 +59,7 @@ Every file in `/docs/` with a one-line description:
 | `docs/ui/component-library.md` | Every shared UI component with props |
 | `docs/ui/layout-system.md` | Root layout, sidebar, header, panels |
 | `docs/ui/theming.md` | CSS variables, Tailwind config, dark mode |
-| `docs/api/ai-flows.md` | All 6 Genkit server actions (the "API") |
+| `docs/api/ai-flows.md` | All 7 Genkit server actions (the "API") |
 | `docs/api/data-utilities.md` | Data processing, statistics, chart utils |
 | `docs/state/client-state.md` | Zustand store, React state patterns |
 | `docs/infra/environment.md` | Environment variables and configuration |
@@ -69,7 +69,7 @@ Every file in `/docs/` with a one-line description:
 
 1. **No SSR** — The entire dashboard is a single `'use client'` page. Data is loaded into browser memory on upload. This simplifies the architecture but means all data processing happens client-side.
 
-2. **Server actions as AI gateway** — The 6 Genkit flows in `src/ai/flows/` are the only server-side code. They act as thin wrappers around Gemini API calls with structured Zod schemas for input/output.
+2. **Server actions as AI gateway** — The 7 Genkit flows in `src/ai/flows/` are the only server-side code. They act as thin wrappers around Gemini API calls with structured Zod schemas for input/output.
 
 3. **AI-first visualization** — Charts are not manually configured. The AI recommends up to 9 charts based on dataset metadata, and the renderer auto-detects column roles if needed.
 
