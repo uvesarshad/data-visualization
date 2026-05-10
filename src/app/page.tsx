@@ -22,7 +22,7 @@ import { perChartAnalysis, PerChartAnalysisOutput } from '@/ai/flows/per-chart-a
 import { naturalLanguageQuery, NLQueryOutput } from '@/ai/flows/natural-language-query';
 import { generateReport, ReportGenerationOutput } from '@/ai/flows/report-generation';
 import { extractMetadata, ColumnMetadata } from '@/app/lib/data-processor';
-import { computeStats, prepareChartData, isNumericColumn } from '@/app/lib/chart-utils';
+import { computeStats, prepareChartData, isNumericColumn, autoDetectVisualizations } from '@/app/lib/chart-utils';
 import { validateData, cleanData } from '@/app/lib/data-validation';
 import { generateCacheKey, getCachedResult, setCachedResult, clearCache } from '@/lib/ai-cache';
 import { dataToCompactTable, metadataToCompactFormat, statsToCompactFormat } from '@/lib/prompt-format';
@@ -171,10 +171,13 @@ export default function DataSenseDashboard() {
       console.error('Error processing data:', error);
       setAnalysisError('AI recommendations unavailable. Using auto-detection.');
       toast({
-        variant: 'destructive',
-        title: 'AI Recommendation Error',
-        description: 'Failed to get AI recommendations. Charts will use auto-detection.'
+        variant: 'default',
+        title: 'Auto-Detection Mode',
+        description: 'AI recommendations unavailable. Charts generated using automatic column detection.'
       });
+      // Fallback: generate recommendations by auto-detecting column types
+      const fallbackRecommendations = autoDetectVisualizations(metadata) as RecommendVisualizationsOutput;
+      setRecommendations(fallbackRecommendations);
       generateInsights(cleaned, groundingEnabled);
     } finally {
       setIsProcessing(false);

@@ -152,8 +152,8 @@ export function ChartPanel({ type, data, title, description, config, onAnalyze, 
           </div>
         )}
       </CardHeader>
-      <CardContent className="flex-1 min-h-[220px] p-3 pt-0 relative">
-        <ChartContainer config={chartConfig} className="w-full h-full absolute inset-0 p-3 pt-0">
+      <CardContent className="flex-1 min-h-[220px] p-3 pt-0 relative overflow-hidden">
+        <ChartContainer config={chartConfig} className="w-full h-full absolute inset-0 p-3 pt-0 !aspect-auto">
           <ChartRenderer
             type={type}
             chartData={chartData}
