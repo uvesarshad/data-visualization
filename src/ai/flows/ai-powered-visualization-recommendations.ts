@@ -1,6 +1,6 @@
 'use server';
 /**
- * @fileOverview An AI agent that analyzes dataset characteristics and recommends suitable visualization types.
+ * @fileOverview An AI agent that analyzes dataset characteristics and recommends a high volume of suitable visualization types.
  *
  * - recommendVisualizations - A function that handles the visualization recommendation process.
  * - RecommendVisualizationsInput - The input type for the recommendVisualizations function.
@@ -16,10 +16,10 @@ const ColumnMetadataSchema = z.object({
   isCategorical: z.boolean().describe('True if the column contains categorical data.'),
   isNumerical: z.boolean().describe('True if the column contains numerical data.'),
   isTemporal: z.boolean().describe('True if the column contains temporal (date/time) data.'),
-  uniqueValuesCount: z.number().optional().describe('The number of unique values in the column (for categorical/string types).'),
-  min: z.number().optional().describe('The minimum value in the column (for numerical types).'),
-  max: z.number().optional().describe('The maximum value in the column (for numerical types).'),
-  avg: z.number().optional().describe('The average value in the column (for numerical types).'),
+  uniqueValuesCount: z.number().optional().describe('The number of unique values in the column.'),
+  min: z.number().optional().describe('The minimum value in the column.'),
+  max: z.number().optional().describe('The maximum value in the column.'),
+  avg: z.number().optional().describe('The average value in the column.'),
   exampleValues: z.array(z.string()).optional().describe('A few example values from the column.'),
 });
 
@@ -36,18 +36,14 @@ const VisualizationRecommendationSchema = z.object({
     'line_graph',
     'scatter_plot',
     'pie_chart',
-    'histogram',
-    'boxplot',
-    'heatmap',
     'area_chart',
-    'bubble_chart',
-    'treemap',
-    'word_cloud',
-    'gauge_chart',
-    'table',
+    'radar_chart',
+    'composed_chart',
+    'stacked_bar',
   ]).describe('The recommended type of visualization.'),
+  title: z.string().describe('A catchy title for this specific chart.'),
   explanation: z.string().describe('A brief explanation of why this visualization is suitable.'),
-  columnsUsed: z.array(z.string()).describe('An array of column names that would be ideal for this visualization.'),
+  columnsUsed: z.array(z.string()).describe('An array of column names used. First is usually X-axis/Category, subsequent are Y-axis/Values.'),
 });
 
 const RecommendVisualizationsOutputSchema = z.object({
@@ -65,23 +61,29 @@ const prompt = ai.definePrompt({
   name: 'recommendVisualizationsPrompt',
   input: {schema: RecommendVisualizationsInputSchema},
   output: {schema: RecommendVisualizationsOutputSchema},
-  prompt: `You are an expert data visualization specialist. Your task is to analyze the provided dataset characteristics and recommend up to 5 suitable visualization types.
+  prompt: `You are an expert data visualization specialist. Your task is to analyze the provided dataset characteristics and recommend as many diverse visualizations as possible (up to 9) to create a comprehensive dashboard.
 
-For each recommendation, explain why it is suitable for the given data and list the specific column names that would be best utilized in that visualization.
+For each recommendation, choose the best type from the supported list: bar_chart, line_graph, scatter_plot, pie_chart, area_chart, radar_chart, composed_chart, stacked_bar.
 
-Prioritize common, effective, and insightful visualization types that help in understanding the data.
-
-Consider the data types, cardinality (unique values count), and overall nature of the dataset to provide the best recommendations.
+Rules:
+1. Mix and match different types to show different angles of the data.
+2. Ensure columnsUsed matches the requirements:
+   - bar_chart, line_graph, area_chart: [CategoryColumn, ValueColumn]
+   - scatter_plot: [NumericX, NumericY]
+   - radar_chart: [CategoryColumn, ValueColumn1, ValueColumn2 (optional)]
+   - pie_chart: [CategoryColumn, ValueColumn]
+   - composed_chart: [CategoryColumn, BarValueColumn, LineValueColumn]
+   - stacked_bar: [CategoryColumn, Value1, Value2...]
 
 Dataset Description: {{{datasetDescription}}}
 Row Count: {{{rowCount}}}
 
 Column Metadata:
 {{#each columnMetadata}}
-- Name: {{{name}}}, Data Type: {{{dataType}}}, Categorical: {{{isCategorical}}}, Numerical: {{{isNumerical}}}, Temporal: {{{isTemporal}}}, Unique Values: {{{uniqueValuesCount}}}, Min: {{{min}}}, Max: {{{max}}}, Avg: {{{avg}}}, Example Values: {{#if exampleValues}}[{{#each exampleValues}}'{{{this}}}'{{#unless @last}}, {{/unless}}{{/each}}]{{else}}N/A{{/if}}
+- Name: {{{name}}}, Type: {{{dataType}}}, Categorical: {{{isCategorical}}}, Numerical: {{{isNumerical}}}, Temporal: {{{isTemporal}}}, Unique: {{{uniqueValuesCount}}}, Min: {{{min}}}, Max: {{{max}}}, Examples: {{#if exampleValues}}[{{#each exampleValues}}'{{{this}}}'{{#unless @last}}, {{/unless}}{{/each}}]{{else}}N/A{{/if}}
 {{/each}}
 
-Please provide your recommendations in the specified JSON format.`,
+Return a large variety of charts.`,
 });
 
 const recommendVisualizationsFlow = ai.defineFlow(
