@@ -152,18 +152,20 @@ export function ChartPanel({ type, data, title, description, config, onAnalyze, 
           </div>
         )}
       </CardHeader>
-      <CardContent className="flex-1 min-h-[220px] p-3 pt-0 relative overflow-hidden">
-        <ChartContainer config={chartConfig} className="w-full h-full absolute inset-0 p-3 pt-0 !aspect-auto">
-          <ChartRenderer
-            type={type}
-            chartData={chartData}
-            config={config}
-            stats={stats}
-            isValid={isValid}
-            errorMessage={errorMessage}
-            rawData={data}
-          />
-        </ChartContainer>
+      <CardContent className="flex-1 p-3 pt-0">
+        <div className="w-full" style={{ height: 280 }}>
+          <ChartContainer config={chartConfig} className="w-full h-full">
+            <ChartRenderer
+              type={type}
+              chartData={chartData}
+              config={config}
+              stats={stats}
+              isValid={isValid}
+              errorMessage={errorMessage}
+              rawData={data}
+            />
+          </ChartContainer>
+        </div>
       </CardContent>
     </Card>
   );
