@@ -2,17 +2,22 @@
 
 > **Scope:** Which rendering modes are used and why. **Rendering context:** Client **Last updated:** 2026-05-10
 
-## Overview
+## Hybrid Architecture
 
-DataSense uses 100% client-side rendering. There is no SSR, SSG, ISR, or server-side page rendering. The single page at `src/app/page.tsx` is marked `'use client'` and all data processing happens in the browser.
+DataSense uses a hybrid model:
+1. **Frontend:** 100% client-side rendering for the UI (`src/app/page.tsx`).
+2. **Backend:** A Node.js server on port 3008 for data persistence (PostgreSQL).
+3. **AI Gateway:** Genkit server actions for AI logic.
 
-## Why CSR Only
+## Why CSR for the UI
 
-The app processes user-uploaded data that exists only in browser memory. There is no server-side database or persistent storage. Server rendering would serve no purpose since there is no data to render on the initial request.
+The UI remains CSR because it provides a highly interactive, "single-app" experience. While data is now persisted server-side, the dashboard itself is rendered entirely in the browser to ensure smooth transitions and real-time visualization updates.
 
-## Server Actions (Not Routes)
+## Server-Side Components
 
-The only server-side code consists of 6 Genkit AI flows in `src/ai/flows/`. These are server actions (`'use server'`) called from client components. They do not render HTML — they return structured data (JSON) to the client.
+The project incorporates server-side logic in two ways:
+1. **Genkit Flows:** 7 AI flows in `src/ai/flows/` (Server Actions) for Gemini integration.
+2. **Backend Server:** An external server on port 3008 that provides a REST API for database operations.
 
 ## Route Structure
 
@@ -29,7 +34,7 @@ There are no dynamic routes, no route groups, no parallel routes, no interceptin
 - Column stats: Computed once in `useMemo`, passed as props
 - No HTTP caching, no CDN, no ISR revalidation
 
-AGENT NOTE: Do not add `'use server'` to any component or page file. Only files in `src/ai/flows/` should use server directives.
+AGENT NOTE: While the UI is CSR, always ensure that data-sensitive operations (storage, AI prompts) are handled on the server side (Backend or Genkit flows).
 
 ## Related Docs
 

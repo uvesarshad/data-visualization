@@ -22,7 +22,14 @@ Data enters the system via file upload, is parsed and validated client-side, the
 - `validateData()` from `src/app/lib/data-validation.ts` checks column count, row count, data types
 - Validation warnings stored in state and displayed in UI
 
-## Stage 3: Metadata Extraction
+## Stage 3: Data Persistence (Backend)
+
+**Entry point:** `src/app/page.tsx` → `handleDataLoaded()`
+- Once validated, data is sent to the backend server (port 3008)
+- Backend persists data to PostgreSQL
+- Allows for session-persistent datasets and multi-user access (future)
+
+## Stage 4: Metadata Extraction
 
 **Entry point:** `src/app/lib/data-processor.ts` → `extractMetadata()`
 - Iterates all columns, determines type (number/date/boolean/string)
@@ -57,10 +64,11 @@ Users can:
 | Boundary | Location | Format |
 |----------|----------|--------|
 | File → Client | `DataUploader` | Raw text/Buffer → `any[]` |
+| Client → Backend | `src/app/page.tsx` | `JSON.stringify(data)` → POST Request |
 | Client → Server (AI) | `src/app/page.tsx` | `dataToCompactTable()` → markdown table string |
 | Server → Client (AI) | All flows | Zod-validated JSON objects |
 
-AGENT NOTE: Data is never persisted. All state lives in React component state and is lost on page refresh.
+AGENT NOTE: Data is persisted in PostgreSQL. Ensure the backend server on port 3008 is running to allow data storage and retrieval.
 
 ## Related Docs
 

@@ -4,7 +4,7 @@
 
 ## Overview
 
-The project has 7 Genkit server actions in `src/ai/flows/`. They are the only server-side code. All flows use `googleai/gemini-2.5-flash` and return Zod-validated structured output.
+The project has 7 Genkit server actions in `src/ai/flows/`. Together with the backend server on port 3008, they form the server-side logic of the application. All flows use `googleai/gemini-2.5-flash` and return Zod-validated structured output.
 
 ## Genkit Configuration
 

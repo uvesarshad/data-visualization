@@ -12,6 +12,8 @@ DataSense is an AI-powered data visualization dashboard built with Next.js App R
 - **Language:** TypeScript 5
 - **React:** 19.2.1
 - **AI:** Google Gemini 2.5 Flash via Genkit 1.28.0
+- **Database:** PostgreSQL (system-installed, local)
+- **Backend:** Node.js/Express (Port 3008)
 - **Charts:** Recharts 2.15.1 (22 chart types)
 - **Styling:** Tailwind CSS 3.4.1 with CSS custom properties
 - **UI Components:** Radix UI primitives (shadcn/ui pattern)
@@ -23,18 +25,17 @@ DataSense is an AI-powered data visualization dashboard built with Next.js App R
 
 - All pages are client-side rendered (`'use client'` directive)
 - AI flows are server-side (`'use server'` directive) and called from client components
-- No SSR, SSG, or ISR — the app is a single-page dashboard
+- Backend logic for data persistence and advanced processing lives in the port 3008 server
 - No middleware.ts exists
-- No API routes exist — all backend logic lives in server actions (Genkit flows)
 
 ## Environment
 
 - **Node:** v24.12.0
 - **Next.js:** 15.5.9
 - **Deployment target:** Local development (not configured)
-- **Required env vars:** `GOOGLE_GENAI_API_KEY` (server-only, for Gemini)
+- **Required env vars:** `GOOGLE_GENAI_API_KEY` (Gemini), `DATABASE_URL` (PostgreSQL), `BACKEND_URL` (Port 3008)
 
-AGENT NOTE: This project has no database, no authentication, no middleware, and no API routes. All data lives in client memory. The only server-side code is the 7 Genkit AI flows.
+AGENT NOTE: This project uses a system-installed PostgreSQL database for persistence. The backend server on port 3008 handles database interactions and data storage.
 
 ## Directory Map
 
@@ -44,8 +45,8 @@ Every file in `/docs/` with a one-line description:
 |------|--------|
 | `docs/overview.md` | This file — project index and mental model |
 | `docs/how-to-update-docs.md` | Decision tree for maintaining documentation |
-| `docs/architecture/rendering-strategy.md` | Why everything is CSR, no SSR/SSG |
-| `docs/architecture/data-flow.md` | Full data lifecycle: upload → AI → chart → user |
+| `docs/architecture/rendering-strategy.md` | Hybrid architecture: CSR UI + Backend Persistence |
+| `docs/architecture/data-flow.md` | Full data lifecycle: upload → DB → AI → chart |
 | `docs/architecture/folder-structure.md` | Every folder's purpose and naming conventions |
 | `docs/modules/data-upload.md` | File upload, parsing, validation, cleaning |
 | `docs/modules/ai-insights.md` | AI-generated insights, key findings, predictions |
@@ -67,9 +68,9 @@ Every file in `/docs/` with a one-line description:
 
 ## Key Architectural Decisions
 
-1. **No SSR** — The entire dashboard is a single `'use client'` page. Data is loaded into browser memory on upload. This simplifies the architecture but means all data processing happens client-side.
+1. **Client-Server Architecture** — While the UI is a single-page dashboard, data is now persisted in a PostgreSQL database via a dedicated backend server. This allows for persistent datasets across sessions.
 
-2. **Server actions as AI gateway** — The 7 Genkit flows in `src/ai/flows/` are the only server-side code. They act as thin wrappers around Gemini API calls with structured Zod schemas for input/output.
+2. **Server actions as AI gateway** — The 7 Genkit flows in `src/ai/flows/` remain the primary AI interface, while the backend server handles structured data storage.
 
 3. **AI-first visualization** — Charts are not manually configured. The AI recommends up to 9 charts based on dataset metadata, and the renderer auto-detects column roles if needed.
 
@@ -83,7 +84,7 @@ Every file in `/docs/` with a one-line description:
 
 - **Auth:** None. No authentication system exists.
 - **Error handling:** Each AI call is wrapped in try/catch with user-facing toast notifications. AI flow outputs are null-checked before use.
-- **Data fetching:** No HTTP fetching. Data enters via file upload. AI calls use Genkit server actions.
+- **Data fetching:** Data is uploaded via the UI and persisted to the PostgreSQL database via the backend server.
 - **Styling:** Tailwind CSS utility classes. CSS custom properties for theming. `cn()` utility for conditional class merging.
 - **Validation:** `src/app/lib/data-validation.ts` validates uploaded data. Zod schemas validate AI flow inputs/outputs.
 

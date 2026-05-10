@@ -10,7 +10,9 @@ The project has minimal environment configuration. One required server-side vari
 
 | Variable | Required | Server/Client | Purpose |
 |----------|----------|---------------|---------|
-| `GOOGLE_GENAI_API_KEY` | Yes | Server only | Google AI API key for Gemini. Used by Genkit flows in `src/ai/genkit.ts`. |
+| `GOOGLE_GENAI_API_KEY` | Yes | Server only | Google AI API key for Gemini. |
+| `DATABASE_URL` | Yes | Backend only | PostgreSQL connection string (e.g., `postgresql://user:pass@localhost:5432/db`). |
+| `BACKEND_URL` | Yes | Client/Server | URL of the backend server (e.g., `http://localhost:3008`). |
 
 AGENT NOTE: No `NEXT_PUBLIC_` prefixed variables exist. The API key is never exposed to the client.
 

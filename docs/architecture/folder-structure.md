@@ -4,7 +4,7 @@
 
 ## Overview
 
-The project uses Next.js App Router structure. All source code lives in `src/`. Documentation lives in `docs/`. Temporary files live in `temp/`.
+The project uses Next.js App Router structure for the frontend and a dedicated Node.js server for the backend. All frontend source code lives in `src/`. Documentation lives in `docs/`. The backend server (port 3008) is currently managed as a separate service but integrated into the DataSense ecosystem.
 
 ## Top-Level Folders
 

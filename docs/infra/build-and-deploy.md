@@ -17,6 +17,7 @@ The project uses Next.js 15 with Turbopack for development and standard `next bu
 | `npm run typecheck` | TypeScript type check (`tsc --noEmit`) |
 | `npm run genkit:dev` | Genkit dev server for AI flow testing |
 | `npm run genkit:watch` | Genkit dev server with file watching |
+| `[backend command]` | Start the backend server on port 3008 (depends on backend setup) |
 
 ## next.config.ts
 
@@ -29,7 +30,11 @@ AGENT NOTE: The `ignoreBuildErrors` and `ignoreDuringBuilds` flags have been rem
 
 ## Deployment Target
 
-The project is currently configured for local development only. No deployment target (e.g., Vercel, Netlify) has been configured.
+The project is currently configured for local development. This requires:
+1. PostgreSQL database running locally.
+2. Backend server running on port 3008.
+3. Next.js dev server running on port 9002.
+4. Genkit dev server (optional, for AI flow testing).
 
 ## Key Dependencies
 
