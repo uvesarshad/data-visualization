@@ -1,4 +1,4 @@
-import { ColumnMetadataSchema } from '@/ai/flows/ai-powered-visualization-recommendations';
+import { ColumnMetadataSchema } from '@/ai/flows/schemas';
 import { z } from 'zod';
 import * as XLSX from 'xlsx';
 

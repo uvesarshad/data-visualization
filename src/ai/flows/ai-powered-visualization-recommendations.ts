@@ -9,19 +9,7 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
-
-const ColumnMetadataSchema = z.object({
-  name: z.string().describe('The name of the column.'),
-  dataType: z.enum(['string', 'number', 'boolean', 'date']).describe('The data type of the column.'),
-  isCategorical: z.boolean().describe('True if the column contains categorical data.'),
-  isNumerical: z.boolean().describe('True if the column contains numerical data.'),
-  isTemporal: z.boolean().describe('True if the column contains temporal (date/time) data.'),
-  uniqueValuesCount: z.number().optional().describe('The number of unique values in the column.'),
-  min: z.number().optional().describe('The minimum value in the column.'),
-  max: z.number().optional().describe('The maximum value in the column.'),
-  avg: z.number().optional().describe('The average value in the column.'),
-  exampleValues: z.array(z.string()).optional().describe('A few example values from the column.'),
-});
+import {ColumnMetadataSchema} from '@/ai/flows/schemas';
 
 const RecommendVisualizationsInputSchema = z.object({
   columnMetadata: z.array(ColumnMetadataSchema).describe('An array of metadata for each column in the dataset.'),
@@ -40,6 +28,20 @@ const VisualizationRecommendationSchema = z.object({
     'radar_chart',
     'composed_chart',
     'stacked_bar',
+    'donut_chart',
+    'radial_bar',
+    'horizontal_bar',
+    'grouped_bar',
+    'stacked_area',
+    'bubble_chart',
+    'multi_bar',
+    'treemap_chart',
+    'box_plot',
+    'waterfall_chart',
+    'histogram',
+    'gauge_kpi',
+    'forecast_chart',
+    'distribution',
   ]).describe('The recommended type of visualization.'),
   title: z.string().describe('A catchy title for this specific chart.'),
   explanation: z.string().describe('A brief explanation of why this visualization is suitable.'),
@@ -63,17 +65,24 @@ const prompt = ai.definePrompt({
   output: {schema: RecommendVisualizationsOutputSchema},
   prompt: `You are an expert data visualization specialist. Your task is to analyze the provided dataset characteristics and recommend as many diverse visualizations as possible (up to 9) to create a comprehensive dashboard.
 
-For each recommendation, choose the best type from the supported list: bar_chart, line_graph, scatter_plot, pie_chart, area_chart, radar_chart, composed_chart, stacked_bar.
+For each recommendation, choose the best type from the supported list: bar_chart, line_graph, scatter_plot, pie_chart, area_chart, radar_chart, composed_chart, stacked_bar, donut_chart, radial_bar, horizontal_bar, grouped_bar, stacked_area, bubble_chart, multi_bar.
 
 Rules:
-1. Mix and match different types to show different angles of the data.
+1. Mix and match different types to show different angles of the data. Use at least 6 different chart types.
 2. Ensure columnsUsed matches the requirements:
-   - bar_chart, line_graph, area_chart: [CategoryColumn, ValueColumn]
-   - scatter_plot: [NumericX, NumericY]
+   - bar_chart, line_graph, area_chart, stacked_area: [CategoryColumn, ValueColumn]
+   - scatter_plot, bubble_chart: [NumericX, NumericY]
    - radar_chart: [CategoryColumn, ValueColumn1, ValueColumn2 (optional)]
-   - pie_chart: [CategoryColumn, ValueColumn]
+   - pie_chart, donut_chart: [CategoryColumn, ValueColumn]
    - composed_chart: [CategoryColumn, BarValueColumn, LineValueColumn]
-   - stacked_bar: [CategoryColumn, Value1, Value2...]
+   - stacked_bar, grouped_bar, multi_bar: [CategoryColumn, Value1, Value2...]
+   - horizontal_bar: [CategoryColumn, ValueColumn]
+   - radial_bar: [CategoryColumn, ValueColumn]
+3. Use columns that actually exist in the metadata. Match exact column names.
+4. For scatter/bubble charts, only use columns where isNumerical is true.
+5. For bar/line/area charts, use a categorical column for X and a numerical column for Y.
+6. For pie/donut charts, use a categorical column with few unique values (<= 12) for the category.
+7. Create diverse titles that describe what each chart reveals about the data.
 
 Dataset Description: {{{datasetDescription}}}
 Row Count: {{{rowCount}}}
@@ -83,7 +92,7 @@ Column Metadata:
 - Name: {{{name}}}, Type: {{{dataType}}}, Categorical: {{{isCategorical}}}, Numerical: {{{isNumerical}}}, Temporal: {{{isTemporal}}}, Unique: {{{uniqueValuesCount}}}, Min: {{{min}}}, Max: {{{max}}}, Examples: {{#if exampleValues}}[{{#each exampleValues}}'{{{this}}}'{{#unless @last}}, {{/unless}}{{/each}}]{{else}}N/A{{/if}}
 {{/each}}
 
-Return a large variety of charts.`,
+Return a large variety of charts using as many different chart types as possible.`,
 });
 
 const recommendVisualizationsFlow = ai.defineFlow(

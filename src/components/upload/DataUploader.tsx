@@ -1,11 +1,11 @@
-
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { Upload, FileText, Database, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Upload, FileText, Database, X, CheckCircle2, AlertCircle, Sparkles, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { SAMPLE_DATASETS, SampleDataset } from '@/app/lib/sample-data';
 
 interface DataUploaderProps {
   onDataLoaded: (data: any[], fileName: string) => void;
@@ -15,6 +15,7 @@ interface DataUploaderProps {
 export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSamples, setShowSamples] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
@@ -68,21 +69,13 @@ export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
     if (file) handleFile(file);
   };
 
-  const handleSqlConnect = () => {
-    // Demo mock: connect to a virtual SQL source
-    const mockData = [
-      { id: 1, category: 'Tech', value: 450, month: 'Jan', revenue: 12000 },
-      { id: 2, category: 'Tech', value: 520, month: 'Feb', revenue: 15000 },
-      { id: 3, category: 'Home', value: 310, month: 'Jan', revenue: 8000 },
-      { id: 4, category: 'Home', value: 290, month: 'Feb', revenue: 7500 },
-      { id: 5, category: 'Garden', value: 150, month: 'Jan', revenue: 3000 },
-      { id: 6, category: 'Garden', value: 480, month: 'Feb', revenue: 9000 },
-    ];
-    onDataLoaded(mockData, 'SQL_Database_Connection');
+  const handleSampleSelect = (dataset: SampleDataset) => {
+    setError(null);
+    onDataLoaded(dataset.data, `${dataset.name} (Sample)`);
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto p-4">
+    <div className="w-full max-w-4xl mx-auto p-4">
       <div 
         className={cn(
           "relative group border-2 border-dashed rounded-2xl transition-all duration-300 p-12 flex flex-col items-center justify-center gap-6 text-center cursor-pointer",
@@ -125,12 +118,50 @@ export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
             <FileText className="w-4 h-4" />
             Browse Files
           </Button>
-          <Button variant="secondary" className="gap-2 bg-accent hover:bg-accent/80" onClick={(e) => { e.stopPropagation(); handleSqlConnect(); }}>
-            <Database className="w-4 h-4" />
-            Connect SQL
+          <Button 
+            variant="secondary" 
+            className="gap-2 bg-accent hover:bg-accent/80 text-white" 
+            onClick={(e) => { e.stopPropagation(); setShowSamples(!showSamples); }}
+          >
+            <Sparkles className="w-4 h-4" />
+            Sample Datasets
+            <ChevronDown className={cn("w-3 h-3 transition-transform", showSamples && "rotate-180")} />
           </Button>
         </div>
       </div>
+
+      {/* Sample Datasets Panel */}
+      {showSamples && (
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-top-4 duration-300">
+          {SAMPLE_DATASETS.map((dataset, idx) => (
+            <Card 
+              key={idx}
+              className="p-4 cursor-pointer hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all group border border-border bg-card/40 backdrop-blur-sm"
+              onClick={(e) => { e.stopPropagation(); handleSampleSelect(dataset); }}
+            >
+              <div className="flex items-start gap-3">
+                <span className="text-2xl">{dataset.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-headline font-bold text-sm group-hover:text-primary transition-colors truncate">
+                    {dataset.name}
+                  </h3>
+                  <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                    {dataset.description}
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-[9px] uppercase tracking-widest text-muted-foreground font-bold bg-muted/50 px-2 py-0.5 rounded">
+                      {dataset.data.length.toLocaleString()} rows
+                    </span>
+                    <span className="text-[9px] uppercase tracking-widest text-muted-foreground font-bold bg-muted/50 px-2 py-0.5 rounded">
+                      {Object.keys(dataset.data[0]).length} cols
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
