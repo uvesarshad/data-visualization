@@ -73,6 +73,7 @@ const nlQueryFlow = ai.defineFlow(
   },
   async (input) => {
     const { output } = await nlQueryPrompt(input);
-    return output!;
+    if (!output) throw new Error('AI returned empty response for naturalLanguageQuery');
+    return output;
   }
 );

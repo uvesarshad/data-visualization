@@ -1,0 +1,1 @@
+- [docs/modules/visualization-recommendations.md] - Runs in parallel with insights) 

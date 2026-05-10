@@ -66,6 +66,7 @@ const anomalyDetectionFlow = ai.defineFlow(
   },
   async (input) => {
     const { output } = await anomalyDetectionPrompt(input);
-    return output!;
+    if (!output) throw new Error('AI returned empty response for anomalyDetection');
+    return output;
   }
 );

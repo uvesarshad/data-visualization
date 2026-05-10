@@ -78,6 +78,7 @@ const reportGenerationFlow = ai.defineFlow(
   },
   async (input) => {
     const { output } = await reportGenerationPrompt(input);
-    return output!;
+    if (!output) throw new Error('AI returned empty response for reportGeneration');
+    return output;
   }
 );

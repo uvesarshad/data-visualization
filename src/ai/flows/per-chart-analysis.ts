@@ -56,6 +56,7 @@ const perChartAnalysisFlow = ai.defineFlow(
   },
   async (input) => {
     const { output } = await perChartAnalysisPrompt(input);
-    return output!;
+    if (!output) throw new Error('AI returned empty response for perChartAnalysis');
+    return output;
   }
 );

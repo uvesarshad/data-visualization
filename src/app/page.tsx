@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   LayoutDashboard, Table as TableIcon, Settings, FileText, BrainCircuit,
   Sparkles, Database, Moon, Sun, LayoutGrid, Zap, ChevronRight, Search,
@@ -19,9 +19,13 @@ import { aiGeneratedDataInsights, AiGeneratedDataInsightsOutput } from '@/ai/flo
 import { perChartAnalysis, PerChartAnalysisOutput } from '@/ai/flows/per-chart-analysis';
 import { naturalLanguageQuery, NLQueryOutput } from '@/ai/flows/natural-language-query';
 import { generateReport, ReportGenerationOutput } from '@/ai/flows/report-generation';
-import { extractMetadata } from '@/app/lib/data-processor';
-import { computeStats } from '@/app/lib/chart-utils';
+import { extractMetadata, ColumnMetadata } from '@/app/lib/data-processor';
+import { computeStats, prepareChartData, isNumericColumn } from '@/app/lib/chart-utils';
 import { validateData, cleanData } from '@/app/lib/data-validation';
+import { generateCacheKey, getCachedResult, setCachedResult, clearCache } from '@/lib/ai-cache';
+import { dataToCompactTable, metadataToCompactFormat, statsToCompactFormat } from '@/lib/prompt-format';
+import { filterData } from '@/lib/filter-parser';
+import { truncateToTokenBudget } from '@/lib/token-budget';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -29,6 +33,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Card } from '@/components/ui/card';
+import { VirtualizedTable } from '@/components/dashboard/VirtualizedTable';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { useTheme } from 'next-themes';
@@ -52,7 +57,7 @@ export default function DataSenseDashboard() {
 
   // NL Query state
   const [nlQueryLoading, setNlQueryLoading] = useState(false);
-  const [nlQueryResult, setNlQueryResult] = useState<{ title: string; explanation: string; chartType: string } | null>(null);
+  const [nlQueryResult, setNlQueryResult] = useState<{ title: string; explanation: string; chartType: string; filter?: string } | null>(null);
   const [nlQueryChart, setNlQueryChart] = useState<NLQueryOutput | null>(null);
 
   // Data Profiler state
@@ -70,9 +75,48 @@ export default function DataSenseDashboard() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
+  // 1.4: Cache metadata to avoid redundant O(n×c) extraction
+  const cachedMetadataRef = useRef<ColumnMetadata[] | null>(null);
+  const cachedMetadataJsonRef = useRef<string | null>(null);
+
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // 2.6: Centralized stats computation — compute once for all numerical columns
+  const columnStats = useMemo(() => {
+    if (!data || data.length === 0) return {};
+    const stats: Record<string, any> = {};
+    const keys = Object.keys(data[0]);
+    keys.forEach(key => {
+      if (isNumericColumn(data, key)) {
+        const s = computeStats(data, key);
+        if (s) stats[key] = s;
+      }
+    });
+    return stats;
+  }, [data]);
+
+  // 2.5: Pre-slice data per chart recommendation
+  const chartDataMap = useMemo(() => {
+    if (!data || !recommendations) return new Map<number, any[]>();
+    const map = new Map<number, any[]>();
+    recommendations.recommendations.forEach((rec, idx) => {
+      const xAxis = rec.columnsUsed[0];
+      const yAxis = rec.columnsUsed[1] || rec.columnsUsed[0];
+      const extraSeries = rec.columnsUsed.slice(2);
+      const sliced = prepareChartData(data, rec.type, xAxis, yAxis, extraSeries);
+      map.set(idx, sliced.length > 0 ? sliced : data.slice(0, 50));
+    });
+    return map;
+  }, [data, recommendations]);
+
+  // 3.1: Filtered NL query data
+  const nlQueryFilteredData = useMemo(() => {
+    if (!data || !nlQueryChart?.filter) return data;
+    const { data: filtered } = filterData(data, nlQueryChart.filter);
+    return filtered;
+  }, [data, nlQueryChart?.filter]);
 
   const handleDataLoaded = async (loadedData: any[], name: string) => {
     // Clean data first
@@ -92,14 +136,31 @@ export default function DataSenseDashboard() {
     setNlQueryResult(null);
     setReport(null);
 
+    // 1.4: Cache metadata on data load
+    const metadata = extractMetadata(cleaned);
+    cachedMetadataRef.current = metadata;
+    cachedMetadataJsonRef.current = JSON.stringify(metadata);
+
+    // 3.2: Edge case guard — skip AI if insufficient data
+    if (cleaned.length < 2) {
+      setAnalysisError('Dataset has too few rows for meaningful AI analysis.');
+      setIsProcessing(false);
+      return;
+    }
+
     try {
-      const metadata = extractMetadata(cleaned);
+      // 2.3: Check cache for visualization recommendations
+      const vizCacheKey = generateCacheKey('recommendVisualizations', { metadata: cachedMetadataJsonRef.current, rowCount: cleaned.length });
+      let vizResult = getCachedResult<RecommendVisualizationsOutput>(vizCacheKey);
       
-      const vizResult = await recommendVisualizations({
-        columnMetadata: metadata,
-        rowCount: cleaned.length,
-        datasetDescription: `Dataset loaded from file: ${name}. Columns: ${Object.keys(cleaned[0]).join(', ')}`
-      });
+      if (!vizResult) {
+        vizResult = await recommendVisualizations({
+          columnMetadata: metadata,
+          rowCount: cleaned.length,
+          datasetDescription: `Dataset loaded from file: ${name}. Columns: ${Object.keys(cleaned[0]).join(', ')}`
+        });
+        setCachedResult(vizCacheKey, vizResult);
+      }
       setRecommendations(vizResult);
 
       generateInsights(cleaned, groundingEnabled);
@@ -119,14 +180,29 @@ export default function DataSenseDashboard() {
   };
 
   const generateInsights = async (dataset: any[], grounded: boolean) => {
+    // 3.2: Edge case guard
+    if (dataset.length < 2) {
+      setAnalysisError('Insufficient data for AI insights.');
+      return;
+    }
+
     setIsGeneratingInsights(true);
     setAnalysisError(null);
     try {
-      const sample = dataset.slice(0, 50);
-      const result = await aiGeneratedDataInsights({
-        dataset: JSON.stringify(sample),
-        groundingEnabled: grounded
-      });
+      // 2.3: Check cache
+      const cacheKey = generateCacheKey('aiGeneratedDataInsights', { dataHash: cachedMetadataJsonRef.current, grounded });
+      let result = getCachedResult<AiGeneratedDataInsightsOutput>(cacheKey);
+      
+      if (!result) {
+        // 2.1: Use compact table format instead of JSON, 5.3: Token budget
+        const sample = dataset.slice(0, 50);
+        const compactData = dataToCompactTable(sample, 50);
+        result = await aiGeneratedDataInsights({
+          dataset: truncateToTokenBudget(compactData),
+          groundingEnabled: grounded
+        });
+        setCachedResult(cacheKey, result);
+      }
       setInsights(result);
     } catch (error) {
       console.error('Error generating insights:', error);
@@ -145,19 +221,32 @@ export default function DataSenseDashboard() {
 
     try {
       const columnsUsed = [config.xAxis, config.yAxis, ...(config.extraSeries || [])];
-      const sample = chartData.slice(0, 30);
-      const statsInfo: Record<string, any> = {};
-      columnsUsed.forEach((col: string) => {
-        const colStats = computeStats(chartData, col);
-        if (colStats) statsInfo[col] = colStats;
-      });
+      
+      // 2.3: Check cache
+      const cacheKey = generateCacheKey('perChartAnalysis', { chartTitle, chartType, columnsUsed });
+      let result = getCachedResult<PerChartAnalysisOutput>(cacheKey);
+      
+      if (!result) {
+        const sample = chartData.slice(0, 10);
+        const statsInfo: Record<string, any> = {};
+        columnsUsed.forEach((col: string) => {
+          // 2.6: Reuse centralized stats
+          if (columnStats[col]) {
+            statsInfo[col] = columnStats[col];
+          } else {
+            const colStats = computeStats(chartData, col);
+            if (colStats) statsInfo[col] = colStats;
+          }
+        });
 
-      const result = await perChartAnalysis({
-        chartTitle,
-        chartType,
-        columnsUsed,
-        dataSummary: JSON.stringify({ sample: sample.slice(0, 10), totalRows: chartData.length, columns: columnsUsed, statistics: statsInfo }, null, 2),
-      });
+        result = await perChartAnalysis({
+          chartTitle,
+          chartType,
+          columnsUsed,
+          dataSummary: JSON.stringify({ sample, totalRows: chartData.length, columns: columnsUsed, statistics: statsInfo }),
+        });
+        setCachedResult(cacheKey, result);
+      }
       setChartAnalysis(result);
     } catch (error) {
       console.error('Error analyzing chart:', error);
@@ -165,7 +254,7 @@ export default function DataSenseDashboard() {
     } finally {
       setChartAnalysisLoading(false);
     }
-  }, [toast]);
+  }, [toast, columnStats]);
 
   const handleNLQuery = useCallback(async (query: string) => {
     if (!data) return;
@@ -174,14 +263,23 @@ export default function DataSenseDashboard() {
     setNlQueryChart(null);
 
     try {
-      const metadata = extractMetadata(data);
-      const result = await naturalLanguageQuery({
-        query,
-        columnMetadata: JSON.stringify(metadata),
-        rowCount: data.length,
-      });
+      // 1.4: Reuse cached metadata
+      const metadataJson = cachedMetadataJsonRef.current || JSON.stringify(extractMetadata(data));
+      
+      // 2.3: Check cache
+      const cacheKey = generateCacheKey('naturalLanguageQuery', { query, metadataJson });
+      let result = getCachedResult<NLQueryOutput>(cacheKey);
+      
+      if (!result) {
+        result = await naturalLanguageQuery({
+          query,
+          columnMetadata: metadataJson,
+          rowCount: data.length,
+        });
+        setCachedResult(cacheKey, result);
+      }
       setNlQueryChart(result);
-      setNlQueryResult({ title: result.title, explanation: result.explanation, chartType: result.chartType });
+      setNlQueryResult({ title: result.title, explanation: result.explanation, chartType: result.chartType, filter: result.filter });
     } catch (error) {
       console.error('NL query error:', error);
       toast({ variant: 'destructive', title: 'Query Error', description: 'Failed to process your question.' });
@@ -197,21 +295,28 @@ export default function DataSenseDashboard() {
     setReportLoading(true);
 
     try {
-      const metadata = extractMetadata(data);
-      const statsInfo: Record<string, any> = {};
-      metadata.filter(m => m.isNumerical).forEach(m => {
-        const colStats = computeStats(data, m.name);
-        if (colStats) statsInfo[m.name] = colStats;
-      });
+      // 1.4: Reuse cached metadata
+      const metadata = cachedMetadataRef.current || extractMetadata(data);
+      
+      // 2.1: Use compact format, 2.6: Reuse centralized stats, 5.3: Token budget
+      const compactStats = statsToCompactFormat(columnStats);
 
-      const result = await generateReport({
-        dataset: JSON.stringify(data.slice(0, 50)),
-        columnStats: JSON.stringify(statsInfo),
-        insights: insights?.insights,
-        fileName,
-        rowCount: data.length,
-        columnCount: Object.keys(data[0]).length,
-      });
+      // 2.3: Check cache
+      const cacheKey = generateCacheKey('generateReport', { fileName, rowCount: data.length, insightsHash: insights?.insights?.substring(0, 100) });
+      let result = getCachedResult<ReportGenerationOutput>(cacheKey);
+      
+      if (!result) {
+        const compactData = dataToCompactTable(data, 50);
+        result = await generateReport({
+          dataset: truncateToTokenBudget(compactData),
+          columnStats: truncateToTokenBudget(compactStats, 2000),
+          insights: insights?.insights,
+          fileName,
+          rowCount: data.length,
+          columnCount: Object.keys(data[0]).length,
+        });
+        setCachedResult(cacheKey, result);
+      }
       setReport(result);
     } catch (error) {
       console.error('Report generation error:', error);
@@ -219,7 +324,7 @@ export default function DataSenseDashboard() {
     } finally {
       setReportLoading(false);
     }
-  }, [data, fileName, insights, toast]);
+  }, [data, fileName, insights, toast, columnStats]);
 
   const handleExportData = () => {
     if (!data) return;
@@ -247,6 +352,10 @@ export default function DataSenseDashboard() {
     setNlQueryResult(null);
     setReport(null);
     setValidationWarnings([]);
+    cachedMetadataRef.current = null;
+    cachedMetadataJsonRef.current = null;
+    // 2.3: Clear AI cache on data reset
+    clearCache();
   };
 
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark');
@@ -330,6 +439,19 @@ export default function DataSenseDashboard() {
                 <BarChart3 className="w-3 h-3 mr-1" />{recommendations.recommendations.length} Charts
               </Badge>
             )}
+            {/* 3.1: Show active NL filter */}
+            {nlQueryChart?.filter && (
+              <Badge variant="outline" className="text-[10px] gap-1">
+                <Search className="w-2.5 h-2.5" />
+                Filter: {nlQueryChart.filter}
+                <button 
+                  className="ml-1 hover:text-destructive" 
+                  onClick={() => { setNlQueryChart(null); setNlQueryResult(null); }}
+                >
+                  ×
+                </button>
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={handleGenerateReport}>
@@ -363,16 +485,17 @@ export default function DataSenseDashboard() {
               <NLQueryBar onSubmit={handleNLQuery} isLoading={nlQueryLoading} result={nlQueryResult} onClearResult={() => { setNlQueryResult(null); setNlQueryChart(null); }} />
             </div>
 
-            {/* NL Query Generated Chart */}
+            {/* NL Query Generated Chart — 3.1: Uses filtered data */}
             {nlQueryChart && data && (
               <div className="mb-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <ChartPanel
                   type={nlQueryChart.chartType}
-                  data={data}
+                  data={nlQueryFilteredData || data}
                   title={nlQueryChart.title}
-                  description={nlQueryChart.explanation}
+                  description={nlQueryChart.explanation + (nlQueryChart.filter ? ` (Filtered: ${nlQueryChart.filter}, ${nlQueryFilteredData?.length} rows)` : '')}
                   config={{ xAxis: nlQueryChart.xAxis, yAxis: nlQueryChart.yAxis, extraSeries: nlQueryChart.extraSeries }}
                   onAnalyze={handleChartAnalysis}
+                  precomputedStats={columnStats}
                 />
               </div>
             )}
@@ -414,15 +537,18 @@ export default function DataSenseDashboard() {
                       const xAxis = rec.columnsUsed[0];
                       const yAxis = rec.columnsUsed[1] || rec.columnsUsed[0];
                       const extraSeries = rec.columnsUsed.slice(2);
+                      // 2.5: Use pre-sliced data instead of full dataset
+                      const chartData = chartDataMap.get(idx) || data;
                       return (
                         <div key={idx} className={cn(idx === 0 ? "xl:col-span-2" : "col-span-1")}>
                           <ChartPanel 
                             type={rec.type}
-                            data={data}
+                            data={chartData}
                             title={rec.title}
                             description={rec.explanation}
                             config={{ xAxis, yAxis, extraSeries }}
                             onAnalyze={handleChartAnalysis}
+                            precomputedStats={columnStats}
                           />
                         </div>
                       );
@@ -438,35 +564,7 @@ export default function DataSenseDashboard() {
               </TabsContent>
 
               <TabsContent value="raw" className="m-0">
-                <Card className="border-border bg-card/30 overflow-hidden">
-                  <div className="p-0 max-h-[75vh] overflow-auto">
-                    <Table>
-                      <TableHeader className="bg-card/80 backdrop-blur sticky top-0 z-10 border-b border-border">
-                        <TableRow className="hover:bg-transparent">
-                          {Object.keys(data[0]).map((key) => (
-                            <TableHead key={key} className="font-headline font-bold text-primary uppercase text-[9px] tracking-widest py-4">
-                              {key}
-                            </TableHead>
-                          ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {data.slice(0, 100).map((row, idx) => (
-                          <TableRow key={idx} className="hover:bg-primary/5 transition-colors border-border/20">
-                            {Object.values(row).map((val: any, vIdx) => (
-                              <TableCell key={vIdx} className="text-xs py-3 font-medium opacity-80">
-                                {typeof val === 'number' ? val.toLocaleString() : String(val).substring(0, 30)}
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  <div className="p-3 border-t border-border/30 bg-card/10 text-center text-[10px] uppercase tracking-widest text-muted-foreground font-bold">
-                    Showing top 100 of {data.length.toLocaleString()} records
-                  </div>
-                </Card>
+                <VirtualizedTable data={data} columns={Object.keys(data[0])} maxRows={1000} />
               </TabsContent>
             </Tabs>
           </div>

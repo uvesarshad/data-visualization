@@ -57,18 +57,23 @@ Dataset:
 {{dataset}}
 
 {{#if groundingEnabled}}
-Use your extensive knowledge and research capabilities (Gemini Research Max) to provide grounded insights and predictions.
+You may use your general knowledge to provide additional context, industry benchmarks, and informed predictions beyond what the raw data shows.
 {{else}}
 Analyze only the provided dataset. Do not use external knowledge.
 {{/if}}
 
+Edge case handling:
+- If the dataset has fewer than 3 rows, state that insights are limited due to insufficient data.
+- If columns contain all-null or empty values, note them as unusable for analysis.
+- If all values in a column are identical, note that there is no variance to analyze.
+
 Provide your analysis in the following structured JSON format:
 {
-  "insights": "Detailed analytical insights derived from the dataset.",
+  "insights": "Detailed analytical insights derived from the dataset. Keep to 2-3 paragraphs.",
   "keyFindings": [
-    "A list of the most important findings from the data."
+    "5-8 bullet points, each one concise sentence describing the most important finding."
   ],
-  "predictions": "Future trends or predictions based on the data analysis."
+  "predictions": "Future trends or predictions based on the data analysis. Keep to 1-2 paragraphs."
 }`,
 });
 
@@ -80,6 +85,7 @@ const aiGeneratedDataInsightsFlow = ai.defineFlow(
   },
   async (input) => {
     const { output } = await aiGeneratedDataInsightsPrompt(input);
-    return output!;
+    if (!output) throw new Error('AI returned empty response for aiGeneratedDataInsights');
+    return output;
   }
 );

@@ -39,7 +39,7 @@ export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
       } else if (isExcel) {
         const buffer = await file.arrayBuffer();
         const { parseExcel } = await import('@/app/lib/data-processor');
-        data = parseExcel(buffer);
+        data = await parseExcel(buffer);
       } else {
         const text = await file.text();
         data = JSON.parse(text);

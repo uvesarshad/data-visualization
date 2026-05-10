@@ -1,27 +1,97 @@
 import { ColumnMetadataSchema } from '@/ai/flows/schemas';
 import { z } from 'zod';
-import * as XLSX from 'xlsx';
 
 export type ColumnMetadata = z.infer<typeof ColumnMetadataSchema>;
 
-export function parseCSV(csv: string) {
-  const lines = csv.trim().split('\n');
+// 1.5: Iterative min/max to avoid stack overflow on large arrays
+function iterMin(values: number[]): number {
+  let min = Infinity;
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] < min) min = values[i];
+  }
+  return min;
+}
+
+function iterMax(values: number[]): number {
+  let max = -Infinity;
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] > max) max = values[i];
+  }
+  return max;
+}
+
+// 3.5: Robust CSV parser handling quoted fields, commas in quotes, escaped quotes
+export function parseCSV(csv: string): any[] {
+  const lines: string[][] = [];
+  let current: string[] = [];
+  let field = '';
+  let inQuotes = false;
+  let i = 0;
+
+  while (i < csv.length) {
+    const ch = csv[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (i + 1 < csv.length && csv[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i++;
+        continue;
+      }
+      field += ch;
+      i++;
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+        i++;
+        continue;
+      }
+      if (ch === ',') {
+        current.push(field);
+        field = '';
+        i++;
+        continue;
+      }
+      if (ch === '\r') {
+        i++;
+        continue;
+      }
+      if (ch === '\n') {
+        current.push(field);
+        field = '';
+        if (current.length > 0) lines.push(current);
+        current = [];
+        i++;
+        continue;
+      }
+      field += ch;
+      i++;
+    }
+  }
+  if (field || current.length > 0) {
+    current.push(field);
+    lines.push(current);
+  }
+
   if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map(h => h.trim());
-  const rows = lines.slice(1).map(line => {
-    const values = line.split(',');
+  const headers = lines[0].map(h => h.trim());
+  return lines.slice(1).map(values => {
     const obj: any = {};
-    headers.forEach((h, i) => {
-      let val: any = values[i]?.trim();
-      if (!isNaN(val as any) && val !== '') val = Number(val);
+    headers.forEach((h, idx) => {
+      let val: any = values[idx]?.trim();
+      if (val !== undefined && val !== '' && !isNaN(val as any)) val = Number(val);
       obj[h] = val;
     });
     return obj;
   });
-  return rows;
 }
 
-export function parseExcel(buffer: ArrayBuffer): any[] {
+// 1.1: Dynamic XLSX import — only loaded when Excel parsing is needed
+export async function parseExcel(buffer: ArrayBuffer): Promise<any[]> {
+  const XLSX = await import('xlsx');
   const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
@@ -50,9 +120,10 @@ export function extractMetadata(data: any[]): ColumnMetadata[] {
       isNumerical,
       isTemporal: !!isDate,
       uniqueValuesCount: uniqueValues.length,
-      min: isNumerical ? Math.min(...numericValues) : undefined,
-      max: isNumerical ? Math.max(...numericValues) : undefined,
-      avg: isNumerical ? numericValues.reduce((a, b) => a + b, 0) / numericValues.length : undefined,
+      // 1.5: Use iterative min/max to prevent stack overflow on large arrays
+      min: isNumerical && numericValues.length > 0 ? iterMin(numericValues) : undefined,
+      max: isNumerical && numericValues.length > 0 ? iterMax(numericValues) : undefined,
+      avg: isNumerical && numericValues.length > 0 ? numericValues.reduce((a, b) => a + b, 0) / numericValues.length : undefined,
       exampleValues: uniqueValues.slice(0, 5).map(v => String(v))
     };
   });
