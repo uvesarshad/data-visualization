@@ -1,0 +1,11 @@
+
+{
+  "placeholderImages": [
+    {
+      "id": "hero-viz",
+      "description": "Abstract data visualization showing growth and connectivity",
+      "imageUrl": "https://picsum.photos/seed/datasense1/1200/800",
+      "imageHint": "data visualization"
+    }
+  ]
+}
