@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, 
   Table as TableIcon, 
@@ -13,7 +13,9 @@ import {
   Layers,
   Search,
   ChevronRight,
-  Database
+  Database,
+  Moon,
+  Sun
 } from 'lucide-react';
 import { DataUploader } from '@/components/upload/DataUploader';
 import { ChartPanel } from '@/components/dashboard/ChartPanel';
@@ -30,6 +32,7 @@ import { Separator } from '@/components/ui/separator';
 import { Card } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { useTheme } from 'next-themes';
 
 export default function DataSenseDashboard() {
   const [data, setData] = useState<any[] | null>(null);
@@ -40,6 +43,13 @@ export default function DataSenseDashboard() {
   const [insights, setInsights] = useState<AiGeneratedDataInsightsOutput | null>(null);
   const [groundingEnabled, setGroundingEnabled] = useState(false);
   const { toast } = useToast();
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  // Avoid hydration mismatch for theme toggle
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const handleDataLoaded = async (loadedData: any[], name: string) => {
     setData(loadedData);
@@ -110,6 +120,10 @@ export default function DataSenseDashboard() {
     setInsights(null);
   };
 
+  const toggleTheme = () => {
+    setTheme(theme === 'dark' ? 'light' : 'dark');
+  };
+
   if (!data) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center p-8">
@@ -141,6 +155,16 @@ export default function DataSenseDashboard() {
             <p className="text-sm text-muted-foreground">Seamlessly import from CSV, JSON, Excel or connect your SQL databases.</p>
           </div>
         </div>
+        {mounted && (
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="fixed bottom-8 right-8 rounded-full bg-card shadow-lg"
+            onClick={toggleTheme}
+          >
+            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </Button>
+        )}
       </div>
     );
   }
@@ -159,7 +183,12 @@ export default function DataSenseDashboard() {
           <Separator className="bg-border" />
           <Button variant="ghost" size="icon" className="text-muted-foreground rounded-xl" onClick={resetData}><Database className="w-5 h-5" /></Button>
         </div>
-        <div className="mt-auto">
+        <div className="mt-auto flex flex-col gap-4">
+          {mounted && (
+            <Button variant="ghost" size="icon" className="text-muted-foreground rounded-xl" onClick={toggleTheme}>
+              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </Button>
+          )}
           <Button variant="ghost" size="icon" className="text-muted-foreground rounded-xl"><Settings className="w-5 h-5" /></Button>
         </div>
       </aside>
@@ -184,7 +213,7 @@ export default function DataSenseDashboard() {
                 className="bg-card/50 border border-border rounded-full py-1.5 pl-10 pr-4 text-xs focus:outline-none focus:ring-1 focus:ring-primary w-48 group-hover:w-64 transition-all"
               />
             </div>
-            <Button size="sm" className="bg-accent hover:bg-accent/80">Export Report</Button>
+            <Button size="sm" className="bg-accent hover:bg-accent/80 text-white">Export Report</Button>
           </div>
         </header>
 
@@ -194,11 +223,11 @@ export default function DataSenseDashboard() {
             <Tabs defaultValue="visuals" className="w-full">
               <div className="flex items-center justify-between mb-8">
                 <TabsList className="bg-card border border-border p-1">
-                  <TabsTrigger value="visuals" className="gap-2 data-[state=active]:bg-primary">
+                  <TabsTrigger value="visuals" className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-white">
                     <LayoutDashboard className="w-4 h-4" />
                     Analytics
                   </TabsTrigger>
-                  <TabsTrigger value="raw" className="gap-2 data-[state=active]:bg-primary">
+                  <TabsTrigger value="raw" className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-white">
                     <TableIcon className="w-4 h-4" />
                     Raw Data
                   </TabsTrigger>
