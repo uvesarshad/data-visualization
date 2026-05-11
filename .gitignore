@@ -44,14 +44,5 @@ next-env.d.ts
 .env.local
 .env
 
-# firebase
-firebase-debug.log
-firestore-debug.log
-
-.modified
-apphosting.yaml
-blueprint.md
 temp/
-scratch/
-.idx
 *.xlsx
