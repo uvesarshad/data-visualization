@@ -1,10 +1,10 @@
 # DataSense — Project Overview
 
-> **Scope:** Single entry point for all AI agents working on this codebase. **Rendering context:** Client (primary), Server (AI flows) **Last updated:** 2026-05-10
+> **Scope:** Single entry point for all AI agents working on this codebase. **Rendering context:** Client (primary), Server (AI flows) **Last updated:** 2026-05-11
 
 ## Overview
 
-DataSense is an AI-powered data visualization dashboard built with Next.js App Router. Users upload CSV, JSON, or Excel files, and the system automatically generates a multi-chart dashboard using AI recommendations from Google Gemini. The app also supports natural language queries, per-chart AI analysis, anomaly detection, and one-click executive report generation.
+DataSense is an AI-powered data visualization dashboard built with Next.js App Router. Users upload CSV, JSON, or Excel files — or fetch them directly from public URLs — and the system automatically generates a multi-chart dashboard using AI recommendations from Google Gemini. The app also supports persistence of analyses, natural language queries, per-chart AI analysis, anomaly detection, and one-click executive report generation.
 
 ## Tech Stack
 
@@ -18,7 +18,8 @@ DataSense is an AI-powered data visualization dashboard built with Next.js App R
 - **Styling:** Tailwind CSS 3.4.1 with CSS custom properties
 - **UI Components:** Radix UI primitives (shadcn/ui pattern)
 - **State:** Zustand (global data store), React useState/useRef/useMemo (local)
-- **Data Processing:** XLSX (Excel), custom CSV parser, custom statistics engine
+- **Data Processing:** XLSX (Excel with auto-sheet detection), custom robust CSV parser, custom statistics engine with iterative processing
+- **Persistence:** Analysis saving/loading via PostgreSQL (backend) and local SQLite (development)
 - **Font:** Inter (body), Space Grotesk (headlines) via next/font
 
 ## Rendering Strategy
@@ -87,6 +88,7 @@ Every file in `/docs/` with a one-line description:
 - **Data fetching:** Data is uploaded via the UI and persisted to the PostgreSQL database via the backend server.
 - **Styling:** Tailwind CSS utility classes. CSS custom properties for theming. `cn()` utility for conditional class merging.
 - **Validation:** `src/app/lib/data-validation.ts` validates uploaded data. Zod schemas validate AI flow inputs/outputs.
+- **Persistence:** Full CRUD for analyses (saving metadata, insights, and charts) is available via `/api/analyses`.
 
 ## Glossary
 
@@ -98,7 +100,9 @@ Every file in `/docs/` with a one-line description:
 | **ColumnMetadata** | Schema describing a data column: name, type, uniqueness, min/max/avg |
 | **prepareChartData** | Utility that transforms raw data into chart-ready format (aggregation, slicing) |
 | **NL Query** | Natural language query — user types a question, AI returns chart config |
+| **Persistence** | The layer that saves analysis state (metadata, insights, charts) to the database |
 | **Token budget** | Maximum characters allowed in an AI prompt to control costs |
+| **URL Fetch** | Ability to import data directly from a public URL (CSV, JSON, Excel) |
 
 ## Related Docs
 

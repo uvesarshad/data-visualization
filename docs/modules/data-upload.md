@@ -1,10 +1,10 @@
 # Data Upload Module
 
-> **Scope:** File upload, parsing, validation, and cleaning. **Rendering context:** Client **Last updated:** 2026-05-10
+> **Scope:** File upload, URL fetching, parsing, validation, and cleaning. **Rendering context:** Client **Last updated:** 2026-05-11
 
 ## Overview
 
-Users upload CSV, JSON, or Excel files via a drag-and-drop interface. Files are parsed client-side, validated, cleaned, and loaded into memory. No data is sent to the server during upload.
+Users upload CSV, JSON, or Excel files via a drag-and-drop interface or by providing a public URL. Data is fetched and parsed client-side, validated, cleaned, and loaded into memory. This module ensures high-quality data enters the visualization pipeline.
 
 ## Entry Points
 
@@ -18,7 +18,8 @@ Users upload CSV, JSON, or Excel files via a drag-and-drop interface. Files are 
 - **Purpose:** Drag-and-drop file upload with sample dataset selection
 - **Props:** `onDataLoaded(data, fileName)`, `isLoading`
 - **Client-side:** Yes
-- **Behavior:** Accepts `.csv`, `.json`, `.xlsx`, `.xls` files. Dynamically imports parsers. Also provides 3 built-in sample datasets.
+- **Behavior:** Accepts `.csv`, `.json`, `.xlsx`, `.xls` files. Supports drag-and-drop, file browsing, and URL fetching. Dynamically imports parsers. Also provides built-in sample datasets.
+- **URL Fetching:** Uses the browser `fetch` API to retrieve datasets from public endpoints. Detects format via `Content-Type` headers or file extensions.
 
 ## Key Utilities
 
@@ -30,6 +31,7 @@ Users upload CSV, JSON, or Excel files via a drag-and-drop interface. Files are 
 ### parseExcel
 - **Path:** `src/app/lib/data-processor.ts`
 - **Purpose:** Parses Excel files using dynamically imported XLSX library
+- **Capabilities:** Automatically detects the "best" sheet (heuristic based on row/column density) and identifies the header row by scanning the first 20 rows.
 - **Client-side:** Yes
 - **AGENT NOTE:** XLSX is dynamically imported to keep it out of the initial bundle (~300KB)
 
@@ -55,8 +57,9 @@ None. All parsing is client-side.
 
 ## Edge Cases
 
-- AGENT NOTE: `parseCSV` handles quoted fields containing commas and escaped quotes. It does NOT handle multi-line quoted fields.
-- AGENT NOTE: `parseExcel` returns a Promise — callers must `await` it.
+- AGENT NOTE: `parseCSV` handles quoted fields containing commas and escaped quotes. It now uses a robust state-machine parser.
+- AGENT NOTE: `parseExcel` handles multi-sheet files by selecting the most populated sheet automatically.
+- AGENT NOTE: `extractMetadata` uses iterative min/max calculations to prevent stack overflow on large datasets (100k+ rows).
 - Files with fewer than 2 rows trigger an edge case guard that skips AI analysis.
 
 ## Related Docs
