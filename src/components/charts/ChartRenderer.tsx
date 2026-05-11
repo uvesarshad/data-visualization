@@ -315,24 +315,41 @@ export default function ChartRenderer({ type, chartData, config, stats, isValid,
       case 'forecast_chart': {
         const values = chartData.map(d => Number(d[config.yAxis]) || 0);
         const forecast = forecastLinear(values);
-        const combinedData = [
-          ...chartData.map((d, i) => ({ ...d, type: 'actual' })),
-          ...forecast.forecast.map((v, i) => ({ 
-            [config.xAxis]: `F${i+1}`, 
-            [config.yAxis]: v,
-            lower: forecast.confidence.lower[i],
-            upper: forecast.confidence.upper[i],
-            type: 'forecast' 
-          }))
-        ];
+        const actualData = chartData.map(d => ({ ...d, isForecast: false }));
+        const lastActual = actualData[actualData.length - 1];
+        const forecastData = forecast.forecast.map((v, i) => ({
+          [config.xAxis]: `F${i+1}`,
+          [config.yAxis]: v,
+          isForecast: true
+        }));
+        const forecastWithConnection = lastActual ? [lastActual, ...forecastData] : forecastData;
+
         return (
-          <LineChart data={combinedData} margin={MARGIN}>
+          <LineChart margin={MARGIN}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
             <XAxis dataKey={config.xAxis} tick={TICK} />
             <YAxis tick={TICK} />
             <Tooltip />
             <Legend wrapperStyle={LEGEND_STYLE} />
-            <Line type="monotone" dataKey={config.yAxis} stroke={COLORS[0]} strokeWidth={2} dot={(props: any) => props.payload.type === 'actual' ? <circle {...props} r={2} /> : null} strokeDasharray={(props: any) => props.payload.type === 'forecast' ? "5 5" : "0"} />
+            <Line 
+              data={actualData}
+              type="monotone" 
+              dataKey={config.yAxis} 
+              stroke={COLORS[0]} 
+              strokeWidth={2} 
+              dot={{ r: 2, fill: COLORS[0] }}
+              name="Actual"
+            />
+            <Line 
+              data={forecastWithConnection}
+              type="monotone" 
+              dataKey={config.yAxis} 
+              stroke={COLORS[0]} 
+              strokeWidth={2} 
+              strokeDasharray="5 5"
+              dot={false}
+              name="Forecast"
+            />
           </LineChart>
         );
       }
