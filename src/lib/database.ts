@@ -98,6 +98,10 @@ export function saveAnalysis(params: {
   groundingEnabled?: boolean;
 }): number {
   const db = getDb();
+  const dataJson = JSON.stringify(params.data);
+  const MAX_SIZE = 100 * 1024 * 1024; // 100MB in bytes
+  const finalDataJson = dataJson.length > MAX_SIZE ? JSON.stringify([]) : dataJson;
+
   const stmt = db.prepare(`
     INSERT INTO analyses (name, file_name, row_count, column_count, column_names, data_json, metadata_json, recommendations_json, insights_json, column_stats_json, validation_warnings_json, grounding_enabled)
     VALUES (@name, @fileName, @rowCount, @columnCount, @columnNames, @dataJson, @metadataJson, @recommendationsJson, @insightsJson, @columnStatsJson, @validationWarningsJson, @groundingEnabled)
@@ -107,9 +111,9 @@ export function saveAnalysis(params: {
     name: params.name,
     fileName: params.fileName,
     rowCount: params.data.length,
-    columnCount: Object.keys(params.data[0]).length,
-    columnNames: JSON.stringify(Object.keys(params.data[0])),
-    dataJson: JSON.stringify(params.data),
+    columnCount: params.data.length > 0 ? Object.keys(params.data[0]).length : 0,
+    columnNames: params.data.length > 0 ? JSON.stringify(Object.keys(params.data[0])) : JSON.stringify([]),
+    dataJson: finalDataJson,
     metadataJson: JSON.stringify(params.metadata),
     recommendationsJson: params.recommendations ? JSON.stringify(params.recommendations) : null,
     insightsJson: params.insights ? JSON.stringify(params.insights) : null,

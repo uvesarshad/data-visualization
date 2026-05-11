@@ -52,15 +52,13 @@ const ChartContainer = React.forwardRef<
         data-chart={chartId}
         ref={ref}
         className={cn(
-          "flex justify-center text-xs [&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-none [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-sector]:outline-none [&_.recharts-surface]:outline-none",
+          "flex justify-center text-xs [&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-area]:fill-opacity-10 [&_.recharts-curve.recharts-bar-background-rectangle]:fill-muted [&_.recharts-curve.recharts-line]:variant-none [&_.recharts-dot]:fill-background [&_.recharts-dot]:stroke-width-2 [&_.recharts-grid-line]:stroke-border/50 [&_.recharts-legend-item]:variant-none [&_.recharts-legend-item]:inline-flex [&_.recharts-legend-item]:items-center [&_.recharts-legend-item]:gap-1 [&_.recharts-legend-item_svg]:h-2 [&_.recharts-legend-item_svg]:w-2 [&_.recharts-legend-item_svg]:rounded-[2px] [&_.recharts-legend-item_svg]:text-primary [&_.recharts-pie-label]:fill-foreground [&_.recharts-polar-grid-concentric-polygon]:stroke-border [&_.recharts-polar-grid-concentric-polygon]:fill-muted/20 [&_.recharts-polar-grid-line]:stroke-border [&_.recharts-reference-line-line]:stroke-border [&_.recharts-reference-line-label]:fill-muted-foreground [&_.recharts-sector]:stroke-background [&_.recharts-sector]:stroke-width-2 [&_.recharts-surface]:outline-none [&_.recharts-tooltip-cursor]:stroke-border [&_.recharts-tooltip-item-list]:variant-none [&_.recharts-tooltip-label]:variant-none [&_.recharts-tooltip-label]:font-medium [&_.recharts-tooltip-wrapper]:outline-none",
           className
         )}
         {...props}
       >
         <ChartStyle id={chartId} config={config} />
-        <RechartsPrimitive.ResponsiveContainer>
-          {children}
-        </RechartsPrimitive.ResponsiveContainer>
+        {children}
       </div>
     </ChartContext.Provider>
   )
@@ -342,6 +340,7 @@ function getPayloadConfigFromPayload(
     configLabelKey = payload[key as keyof typeof payload] as string
   } else if (
     payloadPayload &&
+    key in payloadPayload &&
     key in payloadPayload &&
     typeof payloadPayload[key as keyof typeof payloadPayload] === "string"
   ) {

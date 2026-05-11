@@ -33,15 +33,16 @@ interface ChartPanelProps {
 export function ChartPanel({ type, data, title, description, config, onAnalyze, precomputedStats }: ChartPanelProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   
-  const { chartData, stats, isValid, errorMessage } = useMemo(() => {
+  const { chartData, stats, isValid, errorMessage, effectiveConfig } = useMemo(() => {
     if (!data || data.length === 0) {
-      return { chartData: [], stats: null, isValid: false, errorMessage: 'No data available' };
+      return { chartData: [], stats: null, isValid: false, errorMessage: 'No data available', effectiveConfig: config };
     }
 
     try {
+      let currentConfig = { ...config };
       const firstRow = data[0];
-      const hasXAxis = config.xAxis in firstRow;
-      const hasYAxis = config.yAxis in firstRow;
+      const hasXAxis = currentConfig.xAxis in firstRow;
+      const hasYAxis = currentConfig.yAxis in firstRow;
       
       if (!hasXAxis && !hasYAxis) {
         const keys = Object.keys(firstRow);
@@ -49,52 +50,53 @@ export function ChartPanel({ type, data, title, description, config, onAnalyze, 
         const stringKeys = keys.filter(k => !isNumericColumn(data, k));
         
         if (numericKeys.length > 0 && stringKeys.length > 0) {
-          config = { xAxis: stringKeys[0], yAxis: numericKeys[0], extraSeries: numericKeys.slice(1, 4) };
+          currentConfig = { xAxis: stringKeys[0], yAxis: numericKeys[0], extraSeries: numericKeys.slice(1, 4) };
         } else if (numericKeys.length >= 2) {
-          config = { xAxis: numericKeys[0], yAxis: numericKeys[1], extraSeries: numericKeys.slice(2, 4) };
+          currentConfig = { xAxis: numericKeys[0], yAxis: numericKeys[1], extraSeries: numericKeys.slice(2, 4) };
         } else {
-          return { chartData: [], stats: null, isValid: false, errorMessage: 'Could not find suitable columns for this chart' };
+          return { chartData: [], stats: null, isValid: false, errorMessage: 'Could not find suitable columns for this chart', effectiveConfig: currentConfig };
         }
       } else if (!hasXAxis) {
         const keys = Object.keys(firstRow);
         const stringKey = keys.find(k => !isNumericColumn(data, k));
-        if (stringKey) config = { ...config, xAxis: stringKey };
+        if (stringKey) currentConfig = { ...currentConfig, xAxis: stringKey };
       } else if (!hasYAxis) {
         const keys = Object.keys(firstRow);
         const numKey = keys.find(k => isNumericColumn(data, k));
-        if (numKey) config = { ...config, yAxis: numKey };
+        if (numKey) currentConfig = { ...currentConfig, yAxis: numKey };
       }
 
-      const prepared = prepareChartData(data, type, config.xAxis, config.yAxis, config.extraSeries);
-      const computedStats = precomputedStats?.[config.yAxis] || (isNumericColumn(data, config.yAxis) ? computeStats(data, config.yAxis) : null);
+      const prepared = prepareChartData(data, type, currentConfig.xAxis, currentConfig.yAxis, currentConfig.extraSeries);
+      const computedStats = precomputedStats?.[currentConfig.yAxis] || (isNumericColumn(data, currentConfig.yAxis) ? computeStats(data, currentConfig.yAxis) : null);
       
       return {
         chartData: prepared,
         stats: computedStats,
         isValid: prepared.length > 0,
         errorMessage: prepared.length === 0 ? 'No valid data points after transformation' : undefined,
+        effectiveConfig: currentConfig,
       };
     } catch (err) {
       console.error('Chart data preparation error:', err);
-      return { chartData: [], stats: null, isValid: false, errorMessage: 'Error processing data for chart' };
+      return { chartData: [], stats: null, isValid: false, errorMessage: 'Error processing data for chart', effectiveConfig: config };
     }
-  }, [data, type, config.xAxis, config.yAxis, config.extraSeries, precomputedStats]);
+  }, [data, type, config, precomputedStats]);
 
   const chartConfig = useMemo(() => {
     const cfg: any = {};
-    cfg[config.yAxis] = { label: config.yAxis, color: '#6366F1' };
-    config.extraSeries?.forEach((series, idx) => {
+    cfg[effectiveConfig.yAxis] = { label: effectiveConfig.yAxis, color: '#6366F1' };
+    effectiveConfig.extraSeries?.forEach((series, idx) => {
       const colors = ['#EC4899', '#14B8A6', '#F59E0B', '#3B82F6', '#8B5CF6'];
       cfg[series] = { label: series, color: colors[idx % colors.length] };
     });
     return cfg;
-  }, [config.yAxis, config.extraSeries]);
+  }, [effectiveConfig.yAxis, effectiveConfig.extraSeries]);
 
   const handleAnalyze = async () => {
     if (!onAnalyze) return;
     setIsAnalyzing(true);
     try {
-      await onAnalyze(title, type, data, config);
+      await onAnalyze(title, type, data, effectiveConfig);
     } finally {
       setIsAnalyzing(false);
     }
@@ -152,13 +154,13 @@ export function ChartPanel({ type, data, title, description, config, onAnalyze, 
           </div>
         )}
       </CardHeader>
-      <CardContent className="flex-1 p-3 pt-0">
-        <div className="w-full" style={{ height: 280 }}>
+      <CardContent className="flex-1 p-3 pt-0 overflow-hidden">
+        <div className="w-full h-[280px] min-h-[280px] relative">
           <ChartContainer config={chartConfig} className="w-full h-full">
             <ChartRenderer
               type={type}
               chartData={chartData}
-              config={config}
+              config={effectiveConfig}
               stats={stats}
               isValid={isValid}
               errorMessage={errorMessage}

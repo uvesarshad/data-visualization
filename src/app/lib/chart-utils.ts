@@ -140,65 +140,65 @@ export function prepareChartData(
 ): DataPoint[] {
   if (!data || data.length === 0) return [];
   
-  const safeData = data.slice(0, 100);
+  // Increase safe data limit for better insights, but still cap for performance
+  const safeData = data.slice(0, 2000);
   
   switch (chartType) {
-    case 'pie_chart': {
-      // Aggregate by category, max 8 slices
+    case 'pie_chart':
+    case 'donut_chart':
+    case 'radial_bar': {
+      // These types ALWAYS need aggregation to be readable
       const aggregated = aggregateByCategory(safeData, xAxis, yAxis, 'sum');
-      return aggregated.slice(0, 8);
+      return aggregated.sort((a, b) => (b[yAxis] as number) - (a[yAxis] as number)).slice(0, 10);
     }
     
     case 'bar_chart':
-    case 'area_chart': {
-      // Aggregate if too many rows
-      if (safeData.length > 30) {
-        return aggregateByCategory(safeData, xAxis, yAxis, 'sum');
+    case 'horizontal_bar':
+    case 'multi_bar':
+    case 'stacked_bar':
+    case 'grouped_bar': {
+      // Aggregate by category if there are duplicates or too many points
+      const uniqueX = new Set(safeData.map(d => String(d[xAxis]))).size;
+      if (uniqueX < safeData.length || safeData.length > 20) {
+        if (chartType === 'stacked_bar' || chartType === 'grouped_bar' || chartType === 'multi_bar') {
+          const allCols = [yAxis, ...(extraSeries || [])];
+          return pivotData(safeData, xAxis, xAxis, yAxis, 'sum'); // Simple pivot or multi-agg needed
+          // For now, let's just aggregate the main one or implement multi-column aggregation
+        }
+        return aggregateByCategory(safeData, xAxis, yAxis, 'sum').sort((a, b) => (b[yAxis] as number) - (a[yAxis] as number)).slice(0, 25);
       }
-      return safeData;
+      return safeData.slice(0, 25);
     }
     
-    case 'stacked_bar': {
-      if (safeData.length > 30) {
-        const allCols = [yAxis, ...(extraSeries || [])];
-        // Aggregate first series, then add others
-        const base = aggregateByCategory(safeData, xAxis, yAxis, 'sum');
-        const extras = allCols.slice(1).map(col => aggregateByCategory(safeData, xAxis, col, 'sum'));
-        
-        return base.map((row, i) => {
-          const merged = { ...row };
-          extras.forEach((extra, j) => {
-            if (extra[i]) {
-              merged[allCols[j + 1]] = extra[i][allCols[j + 1]];
-            }
-          });
-          return merged;
-        });
+    case 'line_graph':
+    case 'area_chart':
+    case 'stacked_area':
+    case 'composed_chart': {
+      // For trends, we might want to aggregate if there are too many points
+      if (safeData.length > 50) {
+        return aggregateByCategory(safeData, xAxis, yAxis, 'avg').slice(0, 100);
       }
       return safeData;
     }
     
     case 'radar_chart': {
-      return safeData.slice(0, 10);
+      const aggregated = aggregateByCategory(safeData, xAxis, yAxis, 'sum');
+      return aggregated.slice(0, 12);
     }
     
     case 'scatter_plot': {
-      // Ensure both axes are numeric
       return safeData.filter(row => 
         !isNaN(Number(row[xAxis])) && !isNaN(Number(row[yAxis]))
-      ).slice(0, 100);
+      ).slice(0, 200);
     }
     
-    case 'line_graph':
-    case 'composed_chart': {
-      if (safeData.length > 50) {
-        return aggregateByCategory(safeData, xAxis, yAxis, 'avg');
-      }
-      return safeData;
+    case 'treemap_chart': {
+      const aggregated = aggregateByCategory(safeData, xAxis, yAxis, 'sum');
+      return aggregated.sort((a, b) => (b[yAxis] as number) - (a[yAxis] as number)).slice(0, 30);
     }
     
     default:
-      return safeData;
+      return safeData.slice(0, 50);
   }
 }
 
