@@ -10,7 +10,9 @@ DataSense transforms the traditional data analysis workflow. Instead of manually
 ### 📸 Visual Preview
 
 #### 🎥 Platform Walkthrough
-<video src="sample/Recording.mp4" width="100%" controls></video>
+<div align="center">
+  <video src="sample/Recording.mp4" width="100%" controls></video>
+</div>
 
 #### 🖼️ Screenshots
 <div align="center">
@@ -51,31 +53,31 @@ The application leverages 7 specialized Genkit AI flows:
 
 ```mermaid
 graph TD
-    A[User Uploads File or URL] --> B{Source?}
-    B -- Local File --> C[DataUploader]
-    B -- Public URL --> C
-    C --> D{File Type?}
-    D -- CSV/JSON --> E[parseCSV / JSON.parse]
-    D -- Excel --> F[parseExcel with Auto-Sheet]
-    E --> G[Data Cleaning & Validation]
+    A["User Uploads File or URL"] --> B{"Source?"}
+    B -- "Local File" --> C["DataUploader"]
+    B -- "Public URL" --> C
+    C --> D{"File Type?"}
+    D -- "CSV/JSON" --> E["parseCSV / JSON.parse"]
+    D -- "Excel" --> F["parseExcel with Auto-Sheet"]
+    E --> G["Data Cleaning & Validation"]
     F --> G
-    G --> H[Extract Column Metadata]
-    H --> I[Client Memory & State]
+    G --> H["Extract Column Metadata"]
+    H --> I["Client Memory & State"]
     
-    subgraph Persistence
-        I --> J[Save Analysis to DB]
-        K[Previous Analyses] --> I
+    subgraph Persistence["Data Persistence"]
+        I --> J["Save Analysis to DB"]
+        K["Previous Analyses"] --> I
     end
     
-    subgraph AI Flows (Server Actions)
-        I --> L[recommendVisualizations]
-        I --> M[aiGeneratedDataInsights]
-        I --> N[naturalLanguageQuery]
+    subgraph AIFlows["AI Flows (Server Actions)"]
+        I --> L["recommendVisualizations"]
+        I --> M["aiGeneratedDataInsights"]
+        I --> N["naturalLanguageQuery"]
     end
     
-    L --> O[Dashboard Grid]
-    M --> P[Insights Panel]
-    N --> Q[Dynamic Chart]
+    L --> O["Dashboard Grid"]
+    M --> P["Insights Panel"]
+    N --> Q["Dynamic Chart"]
 ```
 
 - `src/ai/flows/`: Genkit server actions for AI logic.
