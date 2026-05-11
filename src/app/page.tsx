@@ -6,7 +6,7 @@ import {
   Sparkles, Database, Moon, Sun, LayoutGrid, Zap, ChevronRight, Search,
   BarChart3, RefreshCw, Download, FileBarChart, Activity, TrendingUp,
   Command, PanelRightClose, PanelRight, Upload, ArrowUpRight,
-  Layers, GitBranch, Gauge, ChevronDown, X, Menu,
+  Layers, GitBranch, Gauge, ChevronDown, X, Menu, Save, History,
 } from 'lucide-react';
 import { DataUploader } from '@/components/upload/DataUploader';
 import { ChartPanel } from '@/components/dashboard/ChartPanel';
@@ -16,6 +16,8 @@ import { ChartAnalysisDialog } from '@/components/dashboard/ChartAnalysisDialog'
 import { DataProfiler } from '@/components/dashboard/DataProfiler';
 import { NLQueryBar } from '@/components/dashboard/NLQueryBar';
 import { ReportDialog } from '@/components/dashboard/ReportDialog';
+import { SaveAnalysisDialog } from '@/components/dashboard/SaveAnalysisDialog';
+import { PreviousAnalyses } from '@/components/dashboard/PreviousAnalyses';
 import { recommendVisualizations, RecommendVisualizationsOutput } from '@/ai/flows/ai-powered-visualization-recommendations';
 import { aiGeneratedDataInsights, AiGeneratedDataInsightsOutput } from '@/ai/flows/ai-generated-data-insights';
 import { perChartAnalysis, PerChartAnalysisOutput } from '@/ai/flows/per-chart-analysis';
@@ -33,7 +35,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Card } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { VirtualizedTable } from '@/components/dashboard/VirtualizedTable';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -80,6 +82,13 @@ export default function DataSenseDashboard() {
 
   // Upload drag state
   const [isDragOver, setIsDragOver] = useState(false);
+
+  // Save/Load state
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [currentAnalysisId, setCurrentAnalysisId] = useState<number | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
+  const [showPrevious, setShowPrevious] = useState(false);
   
   const { toast } = useToast();
   const { theme, setTheme } = useTheme();
@@ -344,9 +353,106 @@ export default function DataSenseDashboard() {
     setReport(null);
     setValidationWarnings([]);
     setActiveTab('visuals');
+    setCurrentAnalysisId(null);
+    setShowPrevious(false);
     cachedMetadataRef.current = null;
     cachedMetadataJsonRef.current = null;
     clearCache();
+  };
+
+  // Save current analysis to database
+  const handleSaveAnalysis = async (name: string) => {
+    if (!data || !fileName) return;
+    setIsSaving(true);
+    try {
+      const metadata = cachedMetadataRef.current || extractMetadata(data);
+      const payload = {
+        name,
+        fileName,
+        data,
+        metadata,
+        recommendations: recommendations || undefined,
+        insights: insights || undefined,
+        columnStats: Object.keys(columnStats).length > 0 ? columnStats : undefined,
+        validationWarnings: validationWarnings.length > 0 ? validationWarnings : undefined,
+        groundingEnabled,
+      };
+
+      if (currentAnalysisId) {
+        // Update existing analysis
+        const res = await fetch(`/api/analyses/${currentAnalysisId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            recommendations: recommendations || undefined,
+            insights: insights || undefined,
+            columnStats: Object.keys(columnStats).length > 0 ? columnStats : undefined,
+            validationWarnings: validationWarnings.length > 0 ? validationWarnings : undefined,
+            groundingEnabled,
+          }),
+        });
+        if (!res.ok) throw new Error('Failed to update');
+        toast({ title: 'Analysis Updated', description: `"${name}" has been updated.` });
+      } else {
+        // Create new analysis
+        const res = await fetch('/api/analyses', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error('Failed to save');
+        const result = await res.json();
+        setCurrentAnalysisId(result.id);
+        toast({ title: 'Analysis Saved', description: `"${name}" saved successfully.` });
+      }
+    } catch (error) {
+      console.error('Save error:', error);
+      toast({ variant: 'destructive', title: 'Save Error', description: 'Failed to save analysis.' });
+      throw error;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Load a previous analysis from database
+  const handleLoadAnalysis = async (analysisId: number) => {
+    setIsLoadingAnalysis(true);
+    try {
+      const res = await fetch(`/api/analyses/${analysisId}`);
+      if (!res.ok) throw new Error('Failed to load');
+      const { analysis } = await res.json();
+
+      const parsedData = JSON.parse(analysis.data_json);
+      const parsedRecommendations = analysis.recommendations_json ? JSON.parse(analysis.recommendations_json) : null;
+      const parsedInsights = analysis.insights_json ? JSON.parse(analysis.insights_json) : null;
+      const parsedColumnStats = analysis.column_stats_json ? JSON.parse(analysis.column_stats_json) : {};
+      const parsedWarnings = analysis.validation_warnings_json ? JSON.parse(analysis.validation_warnings_json) : [];
+      const parsedMetadata = JSON.parse(analysis.metadata_json);
+
+      setData(parsedData);
+      setFileName(analysis.file_name);
+      setRecommendations(parsedRecommendations);
+      setInsights(parsedInsights);
+      setValidationWarnings(parsedWarnings);
+      setGroundingEnabled(!!analysis.grounding_enabled);
+      setCurrentAnalysisId(analysis.id);
+      setShowPrevious(false);
+      setAnalysisError(null);
+      setNlQueryChart(null);
+      setNlQueryResult(null);
+      setActiveTab('visuals');
+
+      cachedMetadataRef.current = parsedMetadata;
+      cachedMetadataJsonRef.current = analysis.metadata_json;
+
+      toast({ title: 'Analysis Loaded', description: `Restored "${analysis.name}" with ${analysis.row_count.toLocaleString()} rows.` });
+    } catch (error) {
+      console.error('Load error:', error);
+      toast({ variant: 'destructive', title: 'Load Error', description: 'Failed to load analysis.' });
+    } finally {
+      setIsLoadingAnalysis(false);
+    }
   };
 
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark');
@@ -409,7 +515,26 @@ export default function DataSenseDashboard() {
             <div className="max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
               <DataUploader onDataLoaded={handleDataLoaded} isLoading={isProcessing} />
             </div>
+
+            {/* Toggle for Previous Analyses */}
+            <div className="animate-in fade-in duration-700 delay-300">
+              <Button
+                variant="outline"
+                className="gap-2 rounded-xl text-sm font-medium"
+                onClick={() => setShowPrevious(!showPrevious)}
+              >
+                <History className="w-4 h-4" />
+                {showPrevious ? 'Hide Previous Analyses' : 'View Previous Analyses'}
+              </Button>
+            </div>
           </div>
+
+          {/* Previous Analyses */}
+          {showPrevious && (
+            <div className="max-w-6xl mx-auto pb-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <PreviousAnalyses onLoad={handleLoadAnalysis} isLoading={isLoadingAnalysis} />
+            </div>
+          )}
 
           {/* Feature cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto pb-24 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-300">
@@ -503,6 +628,15 @@ export default function DataSenseDashboard() {
           >
             <Activity className="w-[18px] h-[18px] shrink-0" />
             {!sidebarCollapsed && <span>Data Profiler</span>}
+          </button>
+
+          <button
+            onClick={() => setSaveDialogOpen(true)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+            title="Save Analysis"
+          >
+            <Save className="w-[18px] h-[18px] shrink-0" />
+            {!sidebarCollapsed && <span>{currentAnalysisId ? 'Update Analysis' : 'Save Analysis'}</span>}
           </button>
 
           {!sidebarCollapsed && (
@@ -626,10 +760,37 @@ export default function DataSenseDashboard() {
               )}
 
               {/* Stats Overview */}
-              <StatsOverview data={data} />
+              {isProcessing ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {[1, 2, 3, 4, 5].map(i => (
+                    <Card key={i} className="bg-card/40 backdrop-blur-sm border border-border/40">
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="w-9 h-9 rounded-xl bg-muted/30 animate-pulse" />
+                        </div>
+                        <div className="h-3 w-20 bg-muted/30 rounded animate-pulse mb-2" />
+                        <div className="h-6 w-16 bg-muted/20 rounded animate-pulse" />
+                        <div className="h-3 w-28 bg-muted/20 rounded animate-pulse mt-2" />
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <StatsOverview data={data} />
+              )}
 
               {/* NL Query Bar */}
-              <NLQueryBar onSubmit={handleNLQuery} isLoading={nlQueryLoading} result={nlQueryResult} onClearResult={() => { setNlQueryResult(null); setNlQueryChart(null); }} />
+              {isProcessing ? (
+                <Card className="bg-card/30 border border-border/40 rounded-2xl">
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="w-5 h-5 rounded bg-muted/30 animate-pulse" />
+                    <div className="flex-1 h-10 bg-muted/20 rounded-xl animate-pulse" />
+                    <div className="w-20 h-10 bg-muted/30 rounded-xl animate-pulse" />
+                  </CardContent>
+                </Card>
+              ) : (
+                <NLQueryBar onSubmit={handleNLQuery} isLoading={nlQueryLoading} result={nlQueryResult} onClearResult={() => { setNlQueryResult(null); setNlQueryChart(null); }} />
+              )}
 
               {/* NL Query Generated Chart */}
               {hasNLChart && (
@@ -773,6 +934,14 @@ export default function DataSenseDashboard() {
       {/* Dialogs */}
       <ChartAnalysisDialog open={chartAnalysisOpen} onOpenChange={setChartAnalysisOpen} analysis={chartAnalysis} chartTitle={chartAnalysisTitle} chartType={chartAnalysisType} isLoading={chartAnalysisLoading} />
       <ReportDialog open={reportOpen} onOpenChange={setReportOpen} report={report} isLoading={reportLoading} fileName={fileName || undefined} onExport={handleExportData} />
+      <SaveAnalysisDialog
+        open={saveDialogOpen}
+        onOpenChange={setSaveDialogOpen}
+        fileName={fileName || ''}
+        rowCount={data?.length || 0}
+        columnCount={data ? Object.keys(data[0]).length : 0}
+        onSave={handleSaveAnalysis}
+      />
     </div>
   );
 }
