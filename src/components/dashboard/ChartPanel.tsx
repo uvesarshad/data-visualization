@@ -66,19 +66,22 @@ export function ChartPanel({ type, data, title, description, config, onAnalyze, 
         if (numKey) currentConfig = { ...currentConfig, yAxis: numKey };
       }
 
+      console.log('[ChartPanel] Preparing data for:', type, 'config:', currentConfig);
+      
       const prepared = prepareChartData(data, type, currentConfig.xAxis, currentConfig.yAxis, currentConfig.extraSeries);
+      
       const computedStats = precomputedStats?.[currentConfig.yAxis] || (isNumericColumn(data, currentConfig.yAxis) ? computeStats(data, currentConfig.yAxis) : null);
       
       return {
         chartData: prepared,
         stats: computedStats,
         isValid: prepared.length > 0,
-        errorMessage: prepared.length === 0 ? 'No valid data points after transformation' : undefined,
-        effectiveConfig: currentConfig,
+        errorMessage: prepared.length === 0 ? `Could not prepare data for ${type}` : undefined,
+        effectiveConfig: currentConfig
       };
     } catch (err) {
       console.error('Chart data preparation error:', err);
-      return { chartData: [], stats: null, isValid: false, errorMessage: 'Error processing data for chart', effectiveConfig: config };
+      return { chartData: [], stats: null, isValid: false, errorMessage: 'Data preparation error', effectiveConfig: config };
     }
   }, [data, type, config, precomputedStats]);
 

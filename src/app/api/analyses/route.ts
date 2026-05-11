@@ -31,7 +31,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { name, fileName, data, metadata, recommendations, insights, columnStats, validationWarnings, groundingEnabled } = body;
 
+    console.log('[API POST] Saving analysis request for:', name, 'File:', fileName, 'Data size:', data?.length);
+
     if (!name || !fileName || !data || !metadata) {
+      console.error('[API POST] Missing required fields:', { name: !!name, fileName: !!fileName, data: !!data, metadata: !!metadata });
       return NextResponse.json({ error: 'Missing required fields: name, fileName, data, metadata' }, { status: 400 });
     }
 
@@ -47,9 +50,10 @@ export async function POST(request: NextRequest) {
       groundingEnabled,
     });
 
+    console.log('[API POST] Successfully saved analysis with ID:', id);
     return NextResponse.json({ id, success: true });
   } catch (error) {
-    console.error('POST /api/analyses error:', error);
+    console.error('[API POST] error:', error);
     return NextResponse.json({ error: 'Failed to save analysis' }, { status: 500 });
   }
 }

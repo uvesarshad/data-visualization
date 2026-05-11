@@ -90,39 +90,44 @@ export function saveAnalysis(params: {
   name: string;
   fileName: string;
   data: any[];
-  metadata: any[];
+  metadata: any;
   recommendations?: any;
   insights?: any;
   columnStats?: any;
-  validationWarnings?: string[];
+  validationWarnings?: any;
   groundingEnabled?: boolean;
 }): number {
-  const db = getDb();
-  const dataJson = JSON.stringify(params.data);
-  const MAX_SIZE = 100 * 1024 * 1024; // 100MB in bytes
-  const finalDataJson = dataJson.length > MAX_SIZE ? JSON.stringify([]) : dataJson;
+  try {
+    const db = getDb();
+    const dataJson = JSON.stringify(params.data);
+    const MAX_SIZE = 100 * 1024 * 1024; // 100MB in bytes
+    const finalDataJson = dataJson.length > MAX_SIZE ? JSON.stringify([]) : dataJson;
 
-  const stmt = db.prepare(`
-    INSERT INTO analyses (name, file_name, row_count, column_count, column_names, data_json, metadata_json, recommendations_json, insights_json, column_stats_json, validation_warnings_json, grounding_enabled)
-    VALUES (@name, @fileName, @rowCount, @columnCount, @columnNames, @dataJson, @metadataJson, @recommendationsJson, @insightsJson, @columnStatsJson, @validationWarningsJson, @groundingEnabled)
-  `);
+    const stmt = db.prepare(`
+      INSERT INTO analyses (name, file_name, row_count, column_count, column_names, data_json, metadata_json, recommendations_json, insights_json, column_stats_json, validation_warnings_json, grounding_enabled)
+      VALUES (@name, @fileName, @rowCount, @columnCount, @columnNames, @dataJson, @metadataJson, @recommendationsJson, @insightsJson, @columnStatsJson, @validationWarningsJson, @groundingEnabled)
+    `);
 
-  const result = stmt.run({
-    name: params.name,
-    fileName: params.fileName,
-    rowCount: params.data.length,
-    columnCount: params.data.length > 0 ? Object.keys(params.data[0]).length : 0,
-    columnNames: params.data.length > 0 ? JSON.stringify(Object.keys(params.data[0])) : JSON.stringify([]),
-    dataJson: finalDataJson,
-    metadataJson: JSON.stringify(params.metadata),
-    recommendationsJson: params.recommendations ? JSON.stringify(params.recommendations) : null,
-    insightsJson: params.insights ? JSON.stringify(params.insights) : null,
-    columnStatsJson: params.columnStats ? JSON.stringify(params.columnStats) : null,
-    validationWarningsJson: params.validationWarnings ? JSON.stringify(params.validationWarnings) : null,
-    groundingEnabled: params.groundingEnabled ? 1 : 0,
-  });
+    const result = stmt.run({
+      name: params.name,
+      fileName: params.fileName,
+      rowCount: params.data.length,
+      columnCount: params.data.length > 0 ? Object.keys(params.data[0]).length : 0,
+      columnNames: params.data.length > 0 ? JSON.stringify(Object.keys(params.data[0])) : JSON.stringify([]),
+      dataJson: finalDataJson,
+      metadataJson: JSON.stringify(params.metadata),
+      recommendationsJson: params.recommendations ? JSON.stringify(params.recommendations) : null,
+      insightsJson: params.insights ? JSON.stringify(params.insights) : null,
+      columnStatsJson: params.columnStats ? JSON.stringify(params.columnStats) : null,
+      validationWarningsJson: params.validationWarnings ? JSON.stringify(params.validationWarnings) : null,
+      groundingEnabled: params.groundingEnabled ? 1 : 0,
+    });
 
-  return result.lastInsertRowid as number;
+    return result.lastInsertRowid as number;
+  } catch (error) {
+    console.error('[DB] Error saving analysis:', error);
+    throw error;
+  }
 }
 
 export function updateAnalysis(id: number, params: {

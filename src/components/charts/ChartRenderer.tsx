@@ -284,6 +284,59 @@ export default function ChartRenderer({ type, chartData, config, stats, isValid,
         );
       }
 
+      case 'box_plot': {
+        const boxData = computeBoxPlot(chartData.map(d => Number(d[config.yAxis]) || 0));
+        return (
+          <ComposedChart data={[boxData]} margin={MARGIN}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+            <XAxis dataKey="name" tick={TICK} />
+            <YAxis tick={TICK} />
+            <Tooltip />
+            <Bar dataKey="q1" stackId="a" fill="transparent" />
+            <Bar dataKey="q3" stackId="a" fill={COLORS[0]} fillOpacity={0.5} />
+          </ComposedChart>
+        );
+      }
+
+      case 'histogram': {
+        const histData = computeHistogram(chartData.map(d => Number(d[config.yAxis]) || 0));
+        return (
+          <BarChart data={histData.bins} margin={MARGIN}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+            <XAxis dataKey="label" tick={TICK} angle={-30} textAnchor="end" height={40} />
+            <YAxis tick={TICK} />
+            <Tooltip />
+            <Bar dataKey="count" fill={COLORS[0]} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        );
+      }
+
+      case 'time_series_forecast':
+      case 'forecast_chart': {
+        const values = chartData.map(d => Number(d[config.yAxis]) || 0);
+        const forecast = forecastLinear(values);
+        const combinedData = [
+          ...chartData.map((d, i) => ({ ...d, type: 'actual' })),
+          ...forecast.forecast.map((v, i) => ({ 
+            [config.xAxis]: `F${i+1}`, 
+            [config.yAxis]: v,
+            lower: forecast.confidence.lower[i],
+            upper: forecast.confidence.upper[i],
+            type: 'forecast' 
+          }))
+        ];
+        return (
+          <LineChart data={combinedData} margin={MARGIN}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+            <XAxis dataKey={config.xAxis} tick={TICK} />
+            <YAxis tick={TICK} />
+            <Tooltip />
+            <Legend wrapperStyle={LEGEND_STYLE} />
+            <Line type="monotone" dataKey={config.yAxis} stroke={COLORS[0]} strokeWidth={2} dot={(props: any) => props.payload.type === 'actual' ? <circle {...props} r={2} /> : null} strokeDasharray={(props: any) => props.payload.type === 'forecast' ? "5 5" : "0"} />
+          </LineChart>
+        );
+      }
+
       default:
         return (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4 text-center gap-2">
