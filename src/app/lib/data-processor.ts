@@ -93,9 +93,57 @@ export function parseCSV(csv: string): any[] {
 export async function parseExcel(buffer: ArrayBuffer): Promise<any[]> {
   const XLSX = await import('xlsx');
   const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
-  const sheetName = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[sheetName];
-  return XLSX.utils.sheet_to_json(worksheet);
+  
+  // Heuristic: Find the best sheet (most rows * most columns)
+  let bestSheetName = workbook.SheetNames[0];
+  let maxScore = 0;
+
+  workbook.SheetNames.forEach(name => {
+    const sheet = workbook.Sheets[name];
+    const ref = sheet['!ref'];
+    if (ref) {
+      const range = XLSX.utils.decode_range(ref);
+      const rows = range.e.r - range.s.r + 1;
+      const cols = range.e.c - range.s.c + 1;
+      if (rows * cols > maxScore) {
+        maxScore = rows * cols;
+        bestSheetName = name;
+      }
+    }
+  });
+
+  const worksheet = workbook.Sheets[bestSheetName];
+  // Parse all rows as arrays to find the header
+  const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
+  
+  // Find the header row (first row with multiple non-null values that looks like a header)
+  let headerIdx = 0;
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const row = rows[i];
+    const nonNullCount = row.filter(cell => cell !== null && cell !== '').length;
+    // Check if this row looks like a header (at least 3 values, or mostly strings/numbers)
+    if (nonNullCount >= 3) {
+      headerIdx = i;
+      break;
+    }
+  }
+
+  const headers = rows[headerIdx].map((h, i) => h !== null ? String(h).trim() : `Column_${i}`);
+  const dataRows = rows.slice(headerIdx + 1);
+
+  return dataRows
+    .filter(row => row.some(cell => cell !== null && cell !== '')) // Skip empty rows
+    .map(row => {
+      const obj: any = {};
+      headers.forEach((h, i) => {
+        let val = row[i];
+        if (typeof val === 'string') val = val.trim();
+        // Convert numeric strings to numbers if they look like numbers
+        if (val !== null && val !== '' && !isNaN(val as any) && typeof val !== 'boolean') val = Number(val);
+        obj[h] = val;
+      });
+      return obj;
+    });
 }
 
 export function extractMetadata(data: any[]): ColumnMetadata[] {

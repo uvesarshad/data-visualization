@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { Upload, FileText, X, AlertCircle, Sparkles, ChevronDown, ArrowRight, Database, Table2 } from 'lucide-react';
+import { Upload, FileText, X, AlertCircle, Sparkles, ChevronDown, ArrowRight, Database, Table2, Link as LinkIcon, Globe } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { SAMPLE_DATASETS, SampleDataset } from '@/app/lib/sample-data';
 
@@ -17,6 +18,8 @@ export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSamples, setShowSamples] = useState(false);
+  const [dataUrl, setDataUrl] = useState('');
+  const [isFetching, setIsFetching] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
@@ -58,6 +61,55 @@ export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
     }
   };
 
+  const handleUrlSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dataUrl) return;
+
+    setError(null);
+    setIsFetching(true);
+
+    try {
+      const response = await fetch(dataUrl);
+      if (!response.ok) throw new Error('Failed to fetch data from URL');
+
+      const contentType = response.headers.get('content-type') || '';
+      let data: any[] = [];
+      let fileName = dataUrl.split('/').pop() || 'data';
+
+      if (contentType.includes('application/json') || dataUrl.endsWith('.json')) {
+        data = await response.json();
+      } else if (contentType.includes('text/csv') || dataUrl.endsWith('.csv')) {
+        const text = await response.text();
+        const { parseCSV } = await import('@/app/lib/data-processor');
+        data = parseCSV(text);
+      } else if (contentType.includes('spreadsheet') || dataUrl.endsWith('.xlsx') || dataUrl.endsWith('.xls')) {
+        const buffer = await response.arrayBuffer();
+        const { parseExcel } = await import('@/app/lib/data-processor');
+        data = await parseExcel(buffer);
+      } else {
+        // Fallback: try to guess or just try JSON
+        try {
+          data = await response.json();
+        } catch {
+          const text = await response.text();
+          const { parseCSV } = await import('@/app/lib/data-processor');
+          data = parseCSV(text);
+        }
+      }
+
+      if (!Array.isArray(data)) {
+        throw new Error('Invalid data format. Expected an array of objects.');
+      }
+
+      onDataLoaded(data, fileName);
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch or parse data from URL.');
+      console.error(err);
+    } finally {
+      setIsFetching(false);
+    }
+  };
+
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
@@ -83,7 +135,7 @@ export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
           isDragging 
             ? "border-primary bg-primary/5 scale-[1.01] shadow-lg shadow-primary/10" 
             : "border-border/60 hover:border-primary/40 hover:bg-card/20 hover:shadow-md",
-          isLoading && "pointer-events-none opacity-50"
+          (isLoading || isFetching) && "pointer-events-none opacity-50"
         )}
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
@@ -135,20 +187,47 @@ export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
           </div>
         )}
 
-        <div className="flex gap-3 mt-2">
-          <Button variant="outline" size="lg" className="gap-2 rounded-xl font-medium" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>
-            <FileText className="w-4 h-4" />
-            Browse Files
-          </Button>
-          <Button 
-            size="lg" 
-            className="gap-2 rounded-xl font-medium shadow-md shadow-primary/20" 
-            onClick={(e) => { e.stopPropagation(); setShowSamples(!showSamples); }}
-          >
-            <Database className="w-4 h-4" />
-            Sample Datasets
-            <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", showSamples && "rotate-180")} />
-          </Button>
+        <div className="flex flex-col gap-4 w-full max-w-md mt-2">
+          <div className="flex gap-3 justify-center">
+            <Button variant="outline" size="lg" className="gap-2 rounded-xl font-medium" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>
+              <FileText className="w-4 h-4" />
+              Browse Files
+            </Button>
+            <Button 
+              size="lg" 
+              className="gap-2 rounded-xl font-medium shadow-md shadow-primary/20" 
+              onClick={(e) => { e.stopPropagation(); setShowSamples(!showSamples); }}
+            >
+              <Database className="w-4 h-4" />
+              Sample Datasets
+              <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", showSamples && "rotate-180")} />
+            </Button>
+          </div>
+
+          <div className="relative w-full group/input" onClick={(e) => e.stopPropagation()}>
+            <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within/input:text-primary transition-colors">
+              <Globe className="w-4 h-4" />
+            </div>
+            <form onSubmit={handleUrlSubmit}>
+              <Input
+                type="url"
+                placeholder="Or paste a public URL to CSV, JSON, or Excel..."
+                className="pl-10 pr-12 h-12 rounded-xl border-border/60 bg-background/50 focus-visible:ring-primary/20 transition-all"
+                value={dataUrl}
+                onChange={(e) => setDataUrl(e.target.value)}
+                disabled={isLoading || isFetching}
+              />
+              <Button 
+                type="submit"
+                size="sm"
+                variant="ghost"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg p-0 hover:bg-primary/10 hover:text-primary transition-colors"
+                disabled={!dataUrl || isLoading || isFetching}
+              >
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+            </form>
+          </div>
         </div>
       </div>
 
