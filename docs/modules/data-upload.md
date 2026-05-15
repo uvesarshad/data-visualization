@@ -1,68 +1,82 @@
 # Data Upload Module
 
-> **Scope:** File upload, URL fetching, parsing, validation, and cleaning. **Rendering context:** Client **Last updated:** 2026-05-11
+> **Scope:** File upload, URL fetching, Web Worker parsing, validation, and cleaning. **Rendering context:** Client **Last updated:** 2026-05-15
 
 ## Overview
 
-Users upload CSV, JSON, or Excel files via a drag-and-drop interface or by providing a public URL. Data is fetched and parsed client-side, validated, cleaned, and loaded into memory. This module ensures high-quality data enters the visualization pipeline.
+Users upload CSV, JSON, or Excel files via a drag-and-drop interface or by providing a public HTTPS URL. Parsing runs in a Web Worker to keep the UI responsive. Data is validated, cleaned, and loaded into the Zustand store. This module is the first security boundary for untrusted content.
 
 ## Entry Points
 
 - **Component:** `src/components/upload/DataUploader.tsx`
-- **Trigger:** `src/app/page.tsx` → `handleDataLoaded()` callback
+- **Callback:** `src/app/page.tsx` → `handleDataLoaded(data, fileName)`
 
 ## Key Components
 
 ### DataUploader
+
 - **Path:** `src/components/upload/DataUploader.tsx`
-- **Purpose:** Drag-and-drop file upload with sample dataset selection
 - **Props:** `onDataLoaded(data, fileName)`, `isLoading`
-- **Client-side:** Yes
-- **Behavior:** Accepts `.csv`, `.json`, `.xlsx`, `.xls` files. Supports drag-and-drop, file browsing, and URL fetching. Dynamically imports parsers. Also provides built-in sample datasets.
-- **URL Fetching:** Uses the browser `fetch` API to retrieve datasets from public endpoints. Detects format via `Content-Type` headers or file extensions.
+- **Accepts:** `.csv`, `.json`, `.xlsx`, `.xls` via drag-drop, file browser, or URL input
+- **Sample datasets:** Built-in sample datasets selectable from an expandable panel
 
-## Key Utilities
+## File Size Guard
 
-### parseCSV
-- **Path:** `src/app/lib/data-processor.ts`
-- **Purpose:** Robust CSV parser handling quoted fields, escaped quotes, commas in quotes
-- **Client-side:** Yes
+- **Limit:** 50 MB for both file uploads and URL fetches (`MAX_UPLOAD_BYTES` / `MAX_FETCH_BYTES`)
+- Files exceeding the limit are rejected **before parsing** with a descriptive error: `"File is X MB; the upload limit is 50 MB."`
+- URL fetches check the `Content-Length` response header as a pre-check (when available)
 
-### parseExcel
-- **Path:** `src/app/lib/data-processor.ts`
-- **Purpose:** Parses Excel files using dynamically imported XLSX library
-- **Capabilities:** Automatically detects the "best" sheet (heuristic based on row/column density) and identifies the header row by scanning the first 20 rows.
-- **Client-side:** Yes
-- **AGENT NOTE:** XLSX is dynamically imported to keep it out of the initial bundle (~300KB)
+## URL Validation
 
-### cleanData
-- **Path:** `src/app/lib/data-validation.ts`
-- **Purpose:** Removes empty rows, trims whitespace from string values
-- **Options:** `removeEmptyRows`, `trimStrings`
+`validateImportUrl(input)` enforces before any fetch:
+- Only `https://` URLs are allowed (no `http://`, `ftp://`, `file://`, etc.)
+- Blocks loopback hosts: `localhost`, `0.0.0.0`, `::1`, `*.local`, `127.x.x.x`
+- Blocks RFC-1918 / link-local ranges: `10.x`, `192.168.x`, `172.16–31.x`, `169.254.x`
 
-### validateData
-- **Path:** `src/app/lib/data-validation.ts`
-- **Purpose:** Checks column count, row count, data types; returns warnings array
-- **Output:** `{ valid: boolean, warnings: string[] }`
+## Parsing Pipeline
 
-## External Services
+### CSV
+1. `DataUploader` reads file as text
+2. Sends to `parseCSVAsync()` in `src/lib/data-worker-client.ts`
+3. Worker calls `parseCSV()` from `src/app/lib/data-processor.ts`
+4. Falls back to main-thread `parseCSV()` if worker fails to spawn
 
-None. All parsing is client-side.
+### Excel
+1. `DataUploader` reads file as `ArrayBuffer`
+2. Sends to `parseExcelAsync()` in `src/lib/data-worker-client.ts`
+3. Worker calls `parseExcel()` (dynamic `await import('xlsx')`) from `src/app/lib/data-processor.ts`
+4. Falls back to main-thread `parseExcel()` if worker fails to spawn
 
-## State Management
+### JSON
+1. Parsed inline using `safeParseJSON()`:
+   - Strips `__proto__`/`prototype`/`constructor` keys via a JSON reviver function
+   - Unwraps common wrapper shapes: `{data:[...]}`, `{results:[...]}`, `{items:[...]}`
+   - Returns the array directly or throws if result is not an array
 
-- Uploaded data stored in `src/app/page.tsx` via `useState`
-- Also available in Zustand store (`src/lib/data-store.ts`) via `setData()`
-- Metadata cached in `useRef` after extraction
+## Prototype Pollution Protections
 
-## Edge Cases
+All parsers use `Object.create(null)` for row objects so there is no `Object.prototype` chain to poison.
 
-- AGENT NOTE: `parseCSV` handles quoted fields containing commas and escaped quotes. It now uses a robust state-machine parser.
-- AGENT NOTE: `parseExcel` handles multi-sheet files by selecting the most populated sheet automatically.
-- AGENT NOTE: `extractMetadata` uses iterative min/max calculations to prevent stack overflow on large datasets (100k+ rows).
-- Files with fewer than 2 rows trigger an edge case guard that skips AI analysis.
+`parseCSV` additionally strips headers whose name is `__proto__`, `prototype`, or `constructor`.
+
+## Validation and Cleaning
+
+After parsing, `page.tsx → handleDataLoaded()` calls:
+- `cleanData()` — removes empty rows, trims string values
+- `validateData()` — checks column count, row count, data types; returns `warnings[]`
+
+Warnings are displayed in the dashboard with a "Show N more" expander.
+
+## State Flow
+
+```
+Upload/URL → parseCSVAsync() / parseExcelAsync() / safeParseJSON()
+           → cleanData() + validateData()
+           → storeSetData(data, fileName, ...)   ← Zustand store
+           → recommendVisualizations(metadata)   ← AI server action
+```
 
 ## Related Docs
 
-- [docs/architecture/data-flow.md] — Stage 1 and 2 of data lifecycle
-- [docs/api/data-utilities.md] — Parser and validation implementation details
+- [docs/architecture/data-flow.md] — Full data lifecycle stages
+- [docs/api/data-utilities.md] — parseCSV, parseExcel, detectColumnType, cleanData, validateData

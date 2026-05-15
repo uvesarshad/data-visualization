@@ -16,7 +16,7 @@ const ChartInputSchema = z.object({
 });
 
 const BatchChartAnalysisInputSchema = z.object({
-  charts: z.array(ChartInputSchema).describe('Array of charts to analyze.'),
+  charts: z.array(ChartInputSchema).max(9).describe('Array of charts to analyze (max 9).'),
 });
 export type BatchChartAnalysisInput = z.infer<typeof BatchChartAnalysisInputSchema>;
 

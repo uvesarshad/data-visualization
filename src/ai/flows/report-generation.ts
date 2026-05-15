@@ -24,13 +24,13 @@ const ReportSectionSchema = z.object({
 
 const ReportGenerationOutputSchema = z.object({
   executiveSummary: z.string().describe('A concise 2-3 sentence executive summary of the entire dataset.'),
-  sections: z.array(ReportSectionSchema).describe('Report sections with detailed analysis.'),
+  sections: z.array(ReportSectionSchema).min(3).max(6).describe('Report sections with detailed analysis.'),
   keyMetrics: z.array(z.object({
     label: z.string().describe('Metric name.'),
     value: z.string().describe('Metric value.'),
     trend: z.enum(['up', 'down', 'neutral']).describe('Trend direction.'),
     insight: z.string().describe('Brief insight about this metric.'),
-  })).describe('Key metrics extracted from the data.'),
+  })).min(2).max(8).describe('Key metrics extracted from the data.'),
   actionItems: z.array(z.string()).max(5).describe('Top 5 actionable recommendations.'),
   dataQualityNotes: z.string().describe('Notes about data quality and reliability.'),
 });

@@ -61,7 +61,7 @@ ${PROMPT_GUARDRAIL}
 </user_dataset>
 
 {{#if groundingEnabled}}
-You have access to Google Search via the googleSearchRetrieval tool. Use it to enrich the analysis with up-to-date industry benchmarks, market context, and external validation of patterns you observe in the data. Cite sources where they meaningfully strengthen a finding.
+Google Search grounding is enabled. Enrich the analysis with up-to-date industry benchmarks, market context, and external validation of patterns you observe in the data. Cite sources where they meaningfully strengthen a finding.
 {{else}}
 Analyze only the provided dataset. Do not use external knowledge.
 {{/if}}

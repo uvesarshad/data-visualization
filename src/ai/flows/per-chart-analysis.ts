@@ -79,7 +79,7 @@ const perChartAnalysisFlow = ai.defineFlow(
       columnsUsed: sanitizeArrayForPrompt(input.columnsUsed, 120),
       dataSummary: sanitizeForPrompt(input.dataSummary),
     };
-    const callOpts = { config: { maxOutputTokens: 500 } };
+    const callOpts = { config: { maxOutputTokens: 800 } };
     let output;
     try {
       ({ output } = await perChartAnalysisPrompt(cleaned, callOpts));

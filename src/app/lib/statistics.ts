@@ -176,7 +176,7 @@ export function computePercentiles(sortedValues: number[]): PercentileResult {
     return { p10: 0, p25: 0, p50: 0, p75: 0, p90: 0, iqr: 0, lowerFence: 0, upperFence: 0, outliers: [] };
   }
 
-  const sorted = [...sortedValues].sort((a, b) => a - b);
+  const sorted = sortedValues; // caller is responsible for sorted input (parameter name is the contract)
   const n = sorted.length;
 
   const getPercentile = (p: number) => {
@@ -258,14 +258,20 @@ export function computeHistogram(
   const variance = valid.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / valid.length;
   const stdDev = Math.sqrt(variance);
 
+  // Single-pass O(n) bucketing — avoids the O(n × binCount) of per-bin filter calls.
+  const counts = new Array<number>(binCount).fill(0);
+  for (const v of valid) {
+    let bin = Math.floor((v - min) / binWidth);
+    if (bin >= binCount) bin = binCount - 1; // clamp the maximum value into the last bin
+    counts[bin]++;
+  }
   const bins = Array.from({ length: binCount }, (_, i) => {
     const binMin = min + i * binWidth;
     const binMax = binMin + binWidth;
-    const count = valid.filter(v => v >= binMin && (i === binCount - 1 ? v <= binMax : v < binMax)).length;
     return {
       min: Math.round(binMin * 100) / 100,
       max: Math.round(binMax * 100) / 100,
-      count,
+      count: counts[i],
       label: `${Math.round(binMin)}-${Math.round(binMax)}`,
     };
   });
