@@ -5,6 +5,7 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { sanitizeForPrompt, PROMPT_GUARDRAIL } from '@/lib/prompt-sanitize';
 
 const AnomalyDetectionInputSchema = z.object({
   dataset: z.string().describe('JSON string of the dataset (first 100 rows).'),
@@ -39,14 +40,19 @@ const anomalyDetectionPrompt = ai.definePrompt({
   output: { schema: AnomalyDetectionOutputSchema },
   prompt: `You are a data quality expert. Analyze the following dataset for anomalies and provide detailed explanations.
 
-Dataset Sample:
+${PROMPT_GUARDRAIL}
+
+<user_dataset>
 {{dataset}}
+</user_dataset>
 
-Column Statistics:
+<user_column_stats>
 {{columnStats}}
+</user_column_stats>
 
-Statistically Detected Anomalies:
+<user_anomalies>
 {{anomalies}}
+</user_anomalies>
 
 Your task:
 1. Summarize the overall anomaly situation in the dataset
@@ -65,7 +71,18 @@ const anomalyDetectionFlow = ai.defineFlow(
     outputSchema: AnomalyDetectionOutputSchema,
   },
   async (input) => {
-    const { output } = await anomalyDetectionPrompt(input);
+    const cleaned = {
+      dataset: sanitizeForPrompt(input.dataset),
+      columnStats: sanitizeForPrompt(input.columnStats),
+      anomalies: sanitizeForPrompt(input.anomalies),
+    };
+    const callOpts = { config: { maxOutputTokens: 1500 } };
+    let output;
+    try {
+      ({ output } = await anomalyDetectionPrompt(cleaned, callOpts));
+    } catch {
+      ({ output } = await anomalyDetectionPrompt(cleaned, callOpts));
+    }
     if (!output) throw new Error('AI returned empty response for anomalyDetection');
     return output;
   }

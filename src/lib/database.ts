@@ -47,6 +47,7 @@ function getDb(): Database.Database {
       );
 
       CREATE INDEX IF NOT EXISTS idx_analyses_created_at ON analyses(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_analyses_updated_at ON analyses(updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_saved_reports_analysis_id ON saved_reports(analysis_id);
     `);
   }
@@ -86,6 +87,19 @@ export interface AnalysisListItem {
   has_recommendations: number;
 }
 
+export const MAX_DATA_JSON_BYTES = 100 * 1024 * 1024; // 100MB
+
+export class PayloadTooLargeError extends Error {
+  readonly actualBytes: number;
+  readonly maxBytes: number;
+  constructor(actualBytes: number, maxBytes: number = MAX_DATA_JSON_BYTES) {
+    super(`Dataset is ${actualBytes} bytes; exceeds maximum of ${maxBytes} bytes.`);
+    this.name = 'PayloadTooLargeError';
+    this.actualBytes = actualBytes;
+    this.maxBytes = maxBytes;
+  }
+}
+
 export function saveAnalysis(params: {
   name: string;
   fileName: string;
@@ -100,8 +114,9 @@ export function saveAnalysis(params: {
   try {
     const db = getDb();
     const dataJson = JSON.stringify(params.data);
-    const MAX_SIZE = 100 * 1024 * 1024; // 100MB in bytes
-    const finalDataJson = dataJson.length > MAX_SIZE ? JSON.stringify([]) : dataJson;
+    if (dataJson.length > MAX_DATA_JSON_BYTES) {
+      throw new PayloadTooLargeError(dataJson.length);
+    }
 
     const stmt = db.prepare(`
       INSERT INTO analyses (name, file_name, row_count, column_count, column_names, data_json, metadata_json, recommendations_json, insights_json, column_stats_json, validation_warnings_json, grounding_enabled)
@@ -114,7 +129,7 @@ export function saveAnalysis(params: {
       rowCount: params.data.length,
       columnCount: params.data.length > 0 ? Object.keys(params.data[0]).length : 0,
       columnNames: params.data.length > 0 ? JSON.stringify(Object.keys(params.data[0])) : JSON.stringify([]),
-      dataJson: finalDataJson,
+      dataJson,
       metadataJson: JSON.stringify(params.metadata),
       recommendationsJson: params.recommendations ? JSON.stringify(params.recommendations) : null,
       insightsJson: params.insights ? JSON.stringify(params.insights) : null,
@@ -123,6 +138,7 @@ export function saveAnalysis(params: {
       groundingEnabled: params.groundingEnabled ? 1 : 0,
     });
 
+    invalidateCountCache();
     return result.lastInsertRowid as number;
   } catch (error) {
     console.error('[DB] Error saving analysis:', error);
@@ -172,27 +188,48 @@ export function listAnalyses(limit: number = 50, offset: number = 0): AnalysisLi
 export function deleteAnalysis(id: number): boolean {
   const db = getDb();
   const result = db.prepare('DELETE FROM analyses WHERE id = ?').run(id);
+  if (result.changes > 0) invalidateCountCache();
   return result.changes > 0;
+}
+
+/**
+ * Escape the LIKE-pattern metacharacters \, %, and _ in user input so they
+ * don't match unexpectedly. `\` is used as the ESCAPE character in the LIKE clauses.
+ */
+function escapeLikePattern(s: string): string {
+  return s.replace(/[\\%_]/g, '\\$&');
 }
 
 export function searchAnalyses(query: string): AnalysisListItem[] {
   const db = getDb();
+  const pattern = `%${escapeLikePattern(query)}%`;
   return db.prepare(`
     SELECT id, name, file_name, row_count, column_count, column_names, created_at, updated_at,
            CASE WHEN insights_json IS NOT NULL THEN 1 ELSE 0 END as has_insights,
            CASE WHEN recommendations_json IS NOT NULL THEN 1 ELSE 0 END as has_recommendations
     FROM analyses
-    WHERE name LIKE ? OR file_name LIKE ? OR column_names LIKE ?
+    WHERE name LIKE ? ESCAPE '\\' OR file_name LIKE ? ESCAPE '\\' OR column_names LIKE ? ESCAPE '\\'
     ORDER BY updated_at DESC
     LIMIT 50
-  `).all(`%${query}%`, `%${query}%`, `%${query}%`) as AnalysisListItem[];
+  `).all(pattern, pattern, pattern) as AnalysisListItem[];
 }
 
+// Cache the count for 30s. COUNT(*) on a growing table is cheap but called per list request,
+// and the staleness is acceptable here — the UI displays it for context, not correctness.
+let _countCache: { value: number; expires: number } | null = null;
+const COUNT_CACHE_MS = 30_000;
+
 export function getAnalysisCount(): number {
+  const now = Date.now();
+  if (_countCache && _countCache.expires > now) return _countCache.value;
   const db = getDb();
   const row = db.prepare('SELECT COUNT(*) as count FROM analyses').get() as { count: number };
+  _countCache = { value: row.count, expires: now + COUNT_CACHE_MS };
   return row.count;
 }
+
+// Invalidate the count cache after mutations
+function invalidateCountCache() { _countCache = null; }
 
 // ========== Reports CRUD ==========
 

@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { ChartTooltipContent } from '@/components/ui/chart';
 import { BarChart3 } from 'lucide-react';
-import { computeBoxPlot, computeHistogram, forecastLinear } from '@/app/lib/statistics';
+import { computeBoxPlot, computeHistogram, forecastTimeAware } from '@/app/lib/statistics';
 
 const COLORS = [
   '#6366F1', '#EC4899', '#14B8A6', '#F59E0B', '#3B82F6',
@@ -66,6 +66,107 @@ const TreemapContent = (props: any) => {
     </g>
   );
 };
+
+interface BoxPlotSeries {
+  name: string;
+  box: ReturnType<typeof computeBoxPlot>;
+}
+
+function BoxPlotSVG({ boxes, yMin, yMax, colors }: { boxes: BoxPlotSeries[]; yMin: number; yMax: number; colors: string[] }) {
+  const [size, setSize] = React.useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!containerRef.current) return;
+    const el = containerRef.current;
+    const ro = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect;
+      setSize({ w: width, h: height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const padding = { top: 12, right: 16, bottom: 32, left: 44 };
+  const innerW = Math.max(0, size.w - padding.left - padding.right);
+  const innerH = Math.max(0, size.h - padding.top - padding.bottom);
+  const yScale = (v: number) => padding.top + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
+  const bandW = boxes.length > 0 ? innerW / boxes.length : 0;
+  const boxW = Math.min(40, bandW * 0.55);
+
+  // 5 y-axis ticks
+  const yTicks = Array.from({ length: 5 }, (_, i) => yMin + ((yMax - yMin) * i) / 4);
+  const fmt = (n: number) => {
+    if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return Math.abs(n) < 10 ? n.toFixed(2) : n.toFixed(0);
+  };
+
+  return (
+    <div ref={containerRef} className="w-full h-full">
+      {size.w > 0 && size.h > 0 && (
+        <svg width={size.w} height={size.h} role="img" aria-label="Box plot">
+          {/* Y-axis grid + labels */}
+          {yTicks.map((t, i) => (
+            <g key={i}>
+              <line
+                x1={padding.left} x2={padding.left + innerW}
+                y1={yScale(t)} y2={yScale(t)}
+                stroke="hsl(var(--border))" strokeDasharray="3 3" strokeWidth={1}
+              />
+              <text
+                x={padding.left - 6} y={yScale(t)}
+                fontSize={10} fill="hsl(var(--muted-foreground))"
+                textAnchor="end" dominantBaseline="middle"
+              >
+                {fmt(t)}
+              </text>
+            </g>
+          ))}
+
+          {/* Boxes */}
+          {boxes.map((s, i) => {
+            const cx = padding.left + bandW * (i + 0.5);
+            const color = colors[i % colors.length];
+            const { min, q1, median, q3, max, outliers } = s.box;
+            return (
+              <g key={s.name}>
+                {/* Whisker line */}
+                <line x1={cx} x2={cx} y1={yScale(min)} y2={yScale(max)} stroke={color} strokeWidth={1.5} />
+                {/* Whisker caps */}
+                <line x1={cx - boxW * 0.3} x2={cx + boxW * 0.3} y1={yScale(min)} y2={yScale(min)} stroke={color} strokeWidth={1.5} />
+                <line x1={cx - boxW * 0.3} x2={cx + boxW * 0.3} y1={yScale(max)} y2={yScale(max)} stroke={color} strokeWidth={1.5} />
+                {/* Q1-Q3 box */}
+                <rect
+                  x={cx - boxW / 2} y={yScale(q3)}
+                  width={boxW} height={Math.max(1, yScale(q1) - yScale(q3))}
+                  fill={color} fillOpacity={0.25}
+                  stroke={color} strokeWidth={1.5}
+                />
+                {/* Median */}
+                <line x1={cx - boxW / 2} x2={cx + boxW / 2} y1={yScale(median)} y2={yScale(median)} stroke={color} strokeWidth={2} />
+                {/* Outliers */}
+                {outliers.map((o, oi) => (
+                  <circle key={oi} cx={cx} cy={yScale(o)} r={2} fill={color} fillOpacity={0.8} />
+                ))}
+                {/* X-axis label */}
+                <text
+                  x={cx} y={size.h - padding.bottom + 14}
+                  fontSize={10} fill="hsl(var(--muted-foreground))"
+                  textAnchor="middle"
+                >
+                  {s.name.length > 12 ? s.name.slice(0, 11) + '…' : s.name}
+                </text>
+                {/* Tooltip data via native title */}
+                <title>{`${s.name}\nmin ${fmt(min)} · Q1 ${fmt(q1)} · median ${fmt(median)} · Q3 ${fmt(q3)} · max ${fmt(max)}${outliers.length ? ` · ${outliers.length} outliers` : ''}`}</title>
+              </g>
+            );
+          })}
+        </svg>
+      )}
+    </div>
+  );
+}
 
 export default function ChartRenderer({ type, chartData, config, stats, isValid, errorMessage, rawData }: ChartRendererProps) {
   if (!isValid) {
@@ -185,6 +286,26 @@ export default function ChartRenderer({ type, chartData, config, stats, isValid,
         );
       }
 
+      case 'composed_chart': {
+        // First value column → bar; remaining value columns → lines
+        const series = [config.yAxis, ...(config.extraSeries || [])];
+        const barCol = series[0];
+        const lineCols = series.slice(1);
+        return (
+          <ComposedChart data={chartData} margin={MARGIN}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+            <XAxis dataKey={config.xAxis} tick={TICK} angle={-30} textAnchor="end" height={40} />
+            <YAxis tick={TICK} />
+            <Tooltip />
+            <Legend iconType="circle" wrapperStyle={LEGEND_STYLE} />
+            <Bar dataKey={barCol} fill={COLORS[0]} radius={[4, 4, 0, 0]} barSize={20} />
+            {lineCols.map((v, i) => (
+              <Line key={v} type="monotone" dataKey={v} stroke={COLORS[(i + 1) % COLORS.length]} strokeWidth={2} dot={{ r: 2 }} />
+            ))}
+          </ComposedChart>
+        );
+      }
+
       case 'pie_chart':
       case 'donut_chart': {
         const isDonut = type === 'donut_chart';
@@ -198,7 +319,11 @@ export default function ChartRenderer({ type, chartData, config, stats, isValid,
               outerRadius="70%"
               dataKey={config.yAxis}
               nameKey={config.xAxis}
-              label={({ name, percent }: any) => `${String(name).substring(0, 8)} ${(percent * 100).toFixed(0)}%`}
+              label={({ name, percent }: any) => {
+                const s = String(name);
+                const trimmed = s.length > 14 ? s.slice(0, 13) + '…' : s;
+                return `${trimmed} ${(percent * 100).toFixed(0)}%`;
+              }}
               labelLine={{ strokeWidth: 1 }}
             >
               {chartData.map((_, i) => (
@@ -285,16 +410,45 @@ export default function ChartRenderer({ type, chartData, config, stats, isValid,
       }
 
       case 'box_plot': {
-        const boxData = computeBoxPlot(chartData.map(d => Number(d[config.yAxis]) || 0));
+        // Multi-series box plot: yAxis + extraSeries (skip non-numeric)
+        const seriesCols = [config.yAxis, ...(config.extraSeries || [])]
+          .filter((c, i, arr) => arr.indexOf(c) === i)
+          .filter(col => rawData.some(row => !isNaN(Number(row[col]))));
+
+        if (seriesCols.length === 0) {
+          return (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4 text-center gap-2">
+              <BarChart3 className="w-8 h-8 opacity-30" />
+              <p className="text-xs">No numeric columns available for box plot</p>
+            </div>
+          );
+        }
+
+        const boxes = seriesCols.map(col => ({
+          name: col,
+          box: computeBoxPlot(rawData.map(d => Number(d[col])).filter(v => !isNaN(v) && isFinite(v))),
+        }));
+
+        // Global y range across all whiskers + outliers
+        let gMin = Infinity, gMax = -Infinity;
+        boxes.forEach(b => {
+          if (b.box.min < gMin) gMin = b.box.min;
+          if (b.box.max > gMax) gMax = b.box.max;
+          b.box.outliers.forEach(o => {
+            if (o < gMin) gMin = o;
+            if (o > gMax) gMax = o;
+          });
+        });
+        if (!isFinite(gMin) || !isFinite(gMax) || gMin === gMax) {
+          gMin = gMin - 1;
+          gMax = gMax + 1;
+        }
+        const pad = (gMax - gMin) * 0.05;
+        gMin -= pad;
+        gMax += pad;
+
         return (
-          <ComposedChart data={[boxData]} margin={MARGIN}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-            <XAxis dataKey="name" tick={TICK} />
-            <YAxis tick={TICK} />
-            <Tooltip />
-            <Bar dataKey="q1" stackId="a" fill="transparent" />
-            <Bar dataKey="q3" stackId="a" fill={COLORS[0]} fillOpacity={0.5} />
-          </ComposedChart>
+          <BoxPlotSVG boxes={boxes} yMin={gMin} yMax={gMax} colors={COLORS} />
         );
       }
 
@@ -313,14 +467,23 @@ export default function ChartRenderer({ type, chartData, config, stats, isValid,
 
       case 'time_series_forecast':
       case 'forecast_chart': {
-        const values = chartData.map(d => Number(d[config.yAxis]) || 0);
-        const forecast = forecastLinear(values);
+        const xRaw = chartData.map(d => d[config.xAxis]);
+        const yValues = chartData.map(d => Number(d[config.yAxis]) || 0);
+        const { timeAware, forecast } = forecastTimeAware(xRaw, yValues, 3);
+
+        // Format x labels for the forecasted points. Time-aware → date string; fallback → F1/F2/...
+        const fmtX = (ms: number | null, idx: number) => {
+          if (ms == null) return `F${idx + 1}`;
+          const d = new Date(ms);
+          return d.toISOString().slice(0, 10); // YYYY-MM-DD
+        };
+
         const actualData = chartData.map(d => ({ ...d, isForecast: false }));
         const lastActual = actualData[actualData.length - 1];
-        const forecastData = forecast.forecast.map((v, i) => ({
-          [config.xAxis]: `F${i+1}`,
-          [config.yAxis]: v,
-          isForecast: true
+        const forecastData = forecast.map((p, i) => ({
+          [config.xAxis]: fmtX(p.x, i),
+          [config.yAxis]: p.y,
+          isForecast: true,
         }));
         const forecastWithConnection = lastActual ? [lastActual, ...forecastData] : forecastData;
 
@@ -330,22 +493,29 @@ export default function ChartRenderer({ type, chartData, config, stats, isValid,
             <XAxis dataKey={config.xAxis} tick={TICK} />
             <YAxis tick={TICK} />
             <Tooltip />
-            <Legend wrapperStyle={LEGEND_STYLE} />
-            <Line 
+            <Legend
+              wrapperStyle={LEGEND_STYLE}
+              formatter={(value) =>
+                value === 'Forecast'
+                  ? `Forecast${timeAware ? '' : ' (approximate)'}`
+                  : value
+              }
+            />
+            <Line
               data={actualData}
-              type="monotone" 
-              dataKey={config.yAxis} 
-              stroke={COLORS[0]} 
-              strokeWidth={2} 
+              type="monotone"
+              dataKey={config.yAxis}
+              stroke={COLORS[0]}
+              strokeWidth={2}
               dot={{ r: 2, fill: COLORS[0] }}
               name="Actual"
             />
-            <Line 
+            <Line
               data={forecastWithConnection}
-              type="monotone" 
-              dataKey={config.yAxis} 
-              stroke={COLORS[0]} 
-              strokeWidth={2} 
+              type="monotone"
+              dataKey={config.yAxis}
+              stroke={COLORS[0]}
+              strokeWidth={2}
               strokeDasharray="5 5"
               dot={false}
               name="Forecast"

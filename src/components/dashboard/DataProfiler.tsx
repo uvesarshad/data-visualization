@@ -8,8 +8,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import {
   Database, CheckCircle2, AlertTriangle, Info, BarChart3,
-  Type, Hash, Calendar, ToggleLeft, Layers,
+  Type, Hash, Calendar, ToggleLeft, Layers, X,
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { profileData, DataProfile } from '@/app/lib/data-validation';
 
 interface DataProfilerProps {
@@ -40,14 +41,25 @@ export function DataProfiler({ data, open, onClose }: DataProfilerProps) {
   return (
     <Card className="border border-border/50 bg-card/60 backdrop-blur-sm">
       <CardHeader className="p-4 pb-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Database className="w-4 h-4 text-primary" />
             <CardTitle className="text-sm font-headline">Data Profile</CardTitle>
           </div>
-          <Badge variant="secondary" className="text-[9px] uppercase tracking-widest font-bold">
-            Quality: {profile.dataQualityScore}/100
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-[9px] uppercase tracking-widest font-bold">
+              Quality: {profile.dataQualityScore}/100
+            </Badge>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground"
+              onClick={onClose}
+              aria-label="Close data profile"
+            >
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
         </div>
         <CardDescription className="text-xs">
           {profile.totalRows.toLocaleString()} rows · {profile.totalColumns} columns · {profile.memoryEstimate}

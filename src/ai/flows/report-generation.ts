@@ -5,6 +5,7 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { sanitizeForPrompt, PROMPT_GUARDRAIL } from '@/lib/prompt-sanitize';
 
 const ReportGenerationInputSchema = z.object({
   dataset: z.string().describe('JSON string of the dataset sample (first 50 rows).'),
@@ -30,7 +31,7 @@ const ReportGenerationOutputSchema = z.object({
     trend: z.enum(['up', 'down', 'neutral']).describe('Trend direction.'),
     insight: z.string().describe('Brief insight about this metric.'),
   })).describe('Key metrics extracted from the data.'),
-  actionItems: z.array(z.string()).describe('Top 5 actionable recommendations.'),
+  actionItems: z.array(z.string()).max(5).describe('Top 5 actionable recommendations.'),
   dataQualityNotes: z.string().describe('Notes about data quality and reliability.'),
 });
 export type ReportGenerationOutput = z.infer<typeof ReportGenerationOutputSchema>;
@@ -45,19 +46,24 @@ const reportGenerationPrompt = ai.definePrompt({
   output: { schema: ReportGenerationOutputSchema },
   prompt: `You are a senior data analyst preparing an executive report. Generate a comprehensive analysis report for the following dataset.
 
-Dataset: {{fileName}}
+${PROMPT_GUARDRAIL}
+
+<user_file_name>{{fileName}}</user_file_name>
 Rows: {{rowCount}}
 Columns: {{columnCount}}
 
-Data Sample:
+<user_dataset>
 {{dataset}}
+</user_dataset>
 
-Column Statistics:
+<user_column_stats>
 {{columnStats}}
+</user_column_stats>
 
 {{#if insights}}
-Existing Insights:
+<user_existing_insights>
 {{insights}}
+</user_existing_insights>
 {{/if}}
 
 Generate a professional report with:
@@ -77,7 +83,20 @@ const reportGenerationFlow = ai.defineFlow(
     outputSchema: ReportGenerationOutputSchema,
   },
   async (input) => {
-    const { output } = await reportGenerationPrompt(input);
+    const cleaned = {
+      ...input,
+      fileName: sanitizeForPrompt(input.fileName, 200),
+      dataset: sanitizeForPrompt(input.dataset),
+      columnStats: sanitizeForPrompt(input.columnStats),
+      insights: input.insights ? sanitizeForPrompt(input.insights) : input.insights,
+    };
+    const callOpts = { config: { maxOutputTokens: 2000 } };
+    let output;
+    try {
+      ({ output } = await reportGenerationPrompt(cleaned, callOpts));
+    } catch {
+      ({ output } = await reportGenerationPrompt(cleaned, callOpts));
+    }
     if (!output) throw new Error('AI returned empty response for reportGeneration');
     return output;
   }

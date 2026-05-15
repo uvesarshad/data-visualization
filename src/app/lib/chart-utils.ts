@@ -2,6 +2,8 @@
 
 // Chart data transformation utilities
 
+import { iterMin, iterMax } from '@/lib/math-iter';
+
 export interface DataPoint {
   [key: string]: any;
 }
@@ -31,11 +33,53 @@ export function aggregateByCategory(
     switch (aggregation) {
       case 'avg': result = values.reduce((a, b) => a + b, 0) / values.length; break;
       case 'count': result = values.length; break;
-      case 'min': result = Math.min(...values); break;
-      case 'max': result = Math.max(...values); break;
+      case 'min': result = iterMin(values); break;
+      case 'max': result = iterMax(values); break;
       default: result = values.reduce((a, b) => a + b, 0);
     }
     return { [categoryCol]: key, [valueCol]: Math.round(result * 100) / 100 };
+  });
+}
+
+/**
+ * Aggregate multiple numeric columns by a single category column.
+ * Returns one row per category with one field per value column.
+ * Skips per-cell NaN values so non-numeric extraSeries don't poison the whole group.
+ */
+export function aggregateMultipleByCategory(
+  data: DataPoint[],
+  categoryCol: string,
+  valueCols: string[],
+  aggregation: 'sum' | 'avg' | 'count' = 'sum'
+): DataPoint[] {
+  const groups: Record<string, Record<string, number[]>> = {};
+
+  data.forEach(row => {
+    const key = String(row[categoryCol] ?? 'Unknown');
+    if (!groups[key]) {
+      groups[key] = {};
+      valueCols.forEach(col => { groups[key][col] = []; });
+    }
+    valueCols.forEach(col => {
+      const v = Number(row[col]);
+      if (!isNaN(v) && isFinite(v)) groups[key][col].push(v);
+    });
+  });
+
+  return Object.entries(groups).map(([key, cols]) => {
+    const point: DataPoint = { [categoryCol]: key };
+    valueCols.forEach(col => {
+      const values = cols[col];
+      let result: number;
+      if (values.length === 0) { point[col] = 0; return; }
+      switch (aggregation) {
+        case 'avg': result = values.reduce((a, b) => a + b, 0) / values.length; break;
+        case 'count': result = values.length; break;
+        default: result = values.reduce((a, b) => a + b, 0);
+      }
+      point[col] = Math.round(result * 100) / 100;
+    });
+    return point;
   });
 }
 
@@ -153,30 +197,44 @@ export function prepareChartData(
     }
     
     case 'bar_chart':
-    case 'horizontal_bar':
-    case 'multi_bar':
-    case 'stacked_bar':
-    case 'grouped_bar': {
-      // Aggregate by category if there are duplicates or too many points
+    case 'horizontal_bar': {
       const uniqueX = new Set(safeData.map(d => String(d[xAxis]))).size;
       if (uniqueX < safeData.length || safeData.length > 20) {
-        if (chartType === 'stacked_bar' || chartType === 'grouped_bar' || chartType === 'multi_bar') {
-          const allCols = [yAxis, ...(extraSeries || [])];
-          return pivotData(safeData, xAxis, xAxis, yAxis, 'sum'); // Simple pivot or multi-agg needed
-          // For now, let's just aggregate the main one or implement multi-column aggregation
-        }
-        return aggregateByCategory(safeData, xAxis, yAxis, 'sum').sort((a, b) => (b[yAxis] as number) - (a[yAxis] as number)).slice(0, 25);
+        return aggregateByCategory(safeData, xAxis, yAxis, 'sum')
+          .sort((a, b) => (b[yAxis] as number) - (a[yAxis] as number))
+          .slice(0, 25);
       }
       return safeData.slice(0, 25);
     }
-    
+
+    case 'multi_bar':
+    case 'stacked_bar':
+    case 'grouped_bar': {
+      const valueCols = [yAxis, ...(extraSeries || [])].filter((c, i, arr) => arr.indexOf(c) === i);
+      const uniqueX = new Set(safeData.map(d => String(d[xAxis]))).size;
+      if (uniqueX < safeData.length || safeData.length > 20) {
+        return aggregateMultipleByCategory(safeData, xAxis, valueCols, 'sum')
+          .sort((a, b) => (b[yAxis] as number) - (a[yAxis] as number))
+          .slice(0, 25);
+      }
+      return safeData.slice(0, 25);
+    }
+
     case 'line_graph':
     case 'area_chart':
-    case 'stacked_area':
-    case 'composed_chart': {
-      // For trends, we might want to aggregate if there are too many points
+    case 'stacked_area': {
+      const valueCols = [yAxis, ...(extraSeries || [])].filter((c, i, arr) => arr.indexOf(c) === i);
       if (safeData.length > 50) {
-        return aggregateByCategory(safeData, xAxis, yAxis, 'avg').slice(0, 100);
+        return aggregateMultipleByCategory(safeData, xAxis, valueCols, 'avg').slice(0, 100);
+      }
+      return safeData;
+    }
+
+    case 'composed_chart': {
+      // bar + line: needs at least 2 value columns (yAxis + first extraSeries)
+      const valueCols = [yAxis, ...(extraSeries || [])].filter((c, i, arr) => arr.indexOf(c) === i);
+      if (safeData.length > 50) {
+        return aggregateMultipleByCategory(safeData, xAxis, valueCols, 'avg').slice(0, 100);
       }
       return safeData;
     }
@@ -430,6 +488,23 @@ export function autoDetectVisualizations(
     });
   }
 
+  // Dedupe by [type, columnsUsed.join('|')] AND by columnsUsed signature so we
+  // don't ship five different chart types built on the same two columns.
+  const seenTypeCols = new Set<string>();
+  const colsCount = new Map<string, number>();
+  const deduped: typeof recommendations = [];
+  for (const r of recommendations) {
+    const colsKey = r.columnsUsed.join('|');
+    const typeColsKey = `${r.type}::${colsKey}`;
+    if (seenTypeCols.has(typeColsKey)) continue;
+    // Cap at 2 chart types per identical column-set so the dashboard shows variety.
+    const colsSeen = colsCount.get(colsKey) ?? 0;
+    if (colsSeen >= 2) continue;
+    seenTypeCols.add(typeColsKey);
+    colsCount.set(colsKey, colsSeen + 1);
+    deduped.push(r);
+  }
+
   // Cap at 9 recommendations to keep dashboard clean
-  return { recommendations: recommendations.slice(0, 9) };
+  return { recommendations: deduped.slice(0, 9) };
 }

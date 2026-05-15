@@ -22,10 +22,14 @@ export function parseFilterExpression(expr: string): ParsedFilter | null {
     { op: '>=', pattern: /^(.+?)\s*>=\s*(.+)$/ },
     { op: '<=', pattern: /^(.+?)\s*<=\s*(.+)$/ },
     { op: '!=', pattern: /^(.+?)\s*!=\s*(.+)$/ },
+    // Treat SQL-style "<>" as != for tolerance
+    { op: '!=', pattern: /^(.+?)\s*<>\s*(.+)$/ },
     { op: 'not_contains', pattern: /^(.+?)\s+not\s+contains\s+(.+)$/i },
     { op: 'contains', pattern: /^(.+?)\s+contains\s+(.+)$/i },
     { op: '>', pattern: /^(.+?)\s*>\s*(.+)$/ },
     { op: '<', pattern: /^(.+?)\s*<\s*(.+)$/ },
+    // == before = so it's preferred when present
+    { op: '=', pattern: /^(.+?)\s*==\s*(.+)$/ },
     { op: '=', pattern: /^(.+?)\s*=\s*(.+)$/ },
   ];
 

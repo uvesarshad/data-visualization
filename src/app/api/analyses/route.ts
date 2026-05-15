@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { saveAnalysis, listAnalyses, searchAnalyses, getAnalysisCount } from '@/lib/database';
+import { saveAnalysis, listAnalyses, searchAnalyses, getAnalysisCount, PayloadTooLargeError, MAX_DATA_JSON_BYTES } from '@/lib/database';
 
 // GET /api/analyses — list all saved analyses
 export async function GET(request: NextRequest) {
@@ -31,27 +31,50 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { name, fileName, data, metadata, recommendations, insights, columnStats, validationWarnings, groundingEnabled } = body;
 
-    console.log('[API POST] Saving analysis request for:', name, 'File:', fileName, 'Data size:', data?.length);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[API POST] Saving analysis request for:', name, 'File:', fileName, 'Data size:', data?.length);
+    }
 
     if (!name || !fileName || !data || !metadata) {
-      console.error('[API POST] Missing required fields:', { name: !!name, fileName: !!fileName, data: !!data, metadata: !!metadata });
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[API POST] Missing required fields:', { name: !!name, fileName: !!fileName, data: !!data, metadata: !!metadata });
+      }
       return NextResponse.json({ error: 'Missing required fields: name, fileName, data, metadata' }, { status: 400 });
     }
 
-    const id = saveAnalysis({
-      name,
-      fileName,
-      data,
-      metadata,
-      recommendations,
-      insights,
-      columnStats,
-      validationWarnings,
-      groundingEnabled,
-    });
+    try {
+      const id = saveAnalysis({
+        name,
+        fileName,
+        data,
+        metadata,
+        recommendations,
+        insights,
+        columnStats,
+        validationWarnings,
+        groundingEnabled,
+      });
 
-    console.log('[API POST] Successfully saved analysis with ID:', id);
-    return NextResponse.json({ id, success: true });
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[API POST] Successfully saved analysis with ID:', id);
+      }
+      return NextResponse.json({ id, success: true });
+    } catch (err) {
+      if (err instanceof PayloadTooLargeError) {
+        const maxMb = Math.round(MAX_DATA_JSON_BYTES / (1024 * 1024));
+        const actualMb = Math.round(err.actualBytes / (1024 * 1024));
+        return NextResponse.json(
+          {
+            error: 'Dataset too large to save',
+            detail: `Serialized dataset is ${actualMb} MB; the per-analysis limit is ${maxMb} MB. Filter or sample your data before saving.`,
+            actualBytes: err.actualBytes,
+            maxBytes: err.maxBytes,
+          },
+          { status: 413 }
+        );
+      }
+      throw err;
+    }
   } catch (error) {
     console.error('[API POST] error:', error);
     return NextResponse.json({ error: 'Failed to save analysis' }, { status: 500 });

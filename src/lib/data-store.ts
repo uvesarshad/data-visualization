@@ -10,17 +10,25 @@ interface DataStoreState {
   // Data
   data: any[] | null;
   fileName: string | null;
-  
+
   // Cached derived data
   metadata: ColumnMetadata[] | null;
   metadataJson: string | null;
   columnStats: Record<string, any>;
-  
+
   // Validation
   validationWarnings: string[];
-  
+
   // Actions
   setData: (data: any[], fileName: string, warnings?: string[]) => void;
+  loadAnalysisData: (params: {
+    data: any[];
+    fileName: string;
+    metadata: ColumnMetadata[];
+    metadataJson: string;
+    columnStats?: Record<string, any>;
+    validationWarnings?: string[];
+  }) => void;
   clearData: () => void;
   getColumnStats: (column: string) => any;
 }
@@ -58,6 +66,10 @@ export const useDataStore = create<DataStoreState>((set, get) => ({
       columnStats,
       validationWarnings: warnings,
     });
+  },
+
+  loadAnalysisData: ({ data, fileName, metadata, metadataJson, columnStats = {}, validationWarnings = [] }) => {
+    set({ data, fileName, metadata, metadataJson, columnStats, validationWarnings });
   },
 
   clearData: () => {

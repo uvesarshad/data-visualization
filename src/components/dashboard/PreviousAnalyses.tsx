@@ -8,6 +8,10 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   History, Search, Trash2, ArrowRight, Database, Calendar,
   BarChart3, BrainCircuit, Loader2, RefreshCw, FileText, Layers
 } from 'lucide-react';
@@ -31,44 +35,78 @@ interface PreviousAnalysesProps {
   isLoading: boolean;
 }
 
+const PAGE_SIZE = 24;
+
 export function PreviousAnalyses({ onLoad, isLoading }: PreviousAnalysesProps) {
   const [analyses, setAnalyses] = useState<AnalysisListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<AnalysisListItem | null>(null);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const { toast } = useToast();
 
-  const fetchAnalyses = useCallback(async () => {
-    setLoading(true);
+  const fetchAnalyses = useCallback(async (opts: { reset?: boolean } = {}) => {
+    const reset = opts.reset !== false; // default: reset
+    if (reset) {
+      setLoading(true);
+      setOffset(0);
+    } else {
+      setLoadingMore(true);
+    }
     try {
-      const url = searchQuery.trim()
-        ? `/api/analyses?q=${encodeURIComponent(searchQuery.trim())}`
-        : '/api/analyses';
-      const res = await fetch(url);
+      const params = new URLSearchParams();
+      if (searchQuery.trim()) {
+        params.set('q', searchQuery.trim());
+      } else {
+        params.set('limit', String(PAGE_SIZE));
+        params.set('offset', reset ? '0' : String(offset));
+      }
+      const res = await fetch(`/api/analyses?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
-      setAnalyses(data.analyses || []);
+      const incoming: AnalysisListItem[] = data.analyses || [];
+      if (reset) {
+        setAnalyses(incoming);
+      } else {
+        setAnalyses(prev => [...prev, ...incoming]);
+        setOffset(prev => prev + incoming.length);
+      }
+      setTotal(typeof data.total === 'number' ? data.total : incoming.length);
     } catch (err) {
       console.error('Failed to load analyses:', err);
       toast({ variant: 'destructive', title: 'Error', description: 'Failed to load previous analyses.' });
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }, [searchQuery, toast]);
+  }, [searchQuery, offset, toast]);
 
   useEffect(() => {
-    fetchAnalyses();
+    fetchAnalyses({ reset: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Debounced search
   useEffect(() => {
-    const timer = setTimeout(() => { fetchAnalyses(); }, 300);
+    const timer = setTimeout(() => { fetchAnalyses({ reset: true }); }, 300);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery]);
 
-  const handleDelete = async (id: number, e: React.MouseEvent) => {
+  const hasMore = !searchQuery.trim() && analyses.length < total;
+
+  const requestDelete = (analysis: AnalysisListItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Delete this analysis? This cannot be undone.')) return;
+    setPendingDelete(analysis);
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const id = pendingDelete.id;
+    setPendingDelete(null);
     setDeletingId(id);
     try {
       const res = await fetch(`/api/analyses/${id}`, { method: 'DELETE' });
@@ -84,7 +122,10 @@ export function PreviousAnalyses({ onLoad, isLoading }: PreviousAnalysesProps) {
 
   const formatDate = (dateStr: string) => {
     try {
-      const d = new Date(dateStr + 'Z');
+      // SQLite emits `YYYY-MM-DD HH:MM:SS` (UTC). Safari only reliably parses
+      // strict ISO 8601 with a `T` separator, so normalize before appending Z.
+      const isoish = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T');
+      const d = new Date(isoish + (isoish.endsWith('Z') ? '' : 'Z'));
       const now = new Date();
       const diffMs = now.getTime() - d.getTime();
       const diffMins = Math.floor(diffMs / 60000);
@@ -114,11 +155,13 @@ export function PreviousAnalyses({ onLoad, isLoading }: PreviousAnalysesProps) {
           <div>
             <h2 className="font-headline font-bold text-lg tracking-tight">Previous Analyses</h2>
             <p className="text-xs text-muted-foreground">
-              {analyses.length > 0 ? `${analyses.length} saved analysis${analyses.length !== 1 ? 'es' : ''}` : 'No saved analyses yet'}
+              {total > 0
+                ? `Showing ${analyses.length} of ${total} saved`
+                : 'No saved analyses yet'}
             </p>
           </div>
         </div>
-        <Button variant="ghost" size="icon" onClick={fetchAnalyses} disabled={loading} className="rounded-xl">
+        <Button variant="ghost" size="icon" onClick={() => fetchAnalyses({ reset: true })} disabled={loading} className="rounded-xl" aria-label="Refresh list">
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
         </Button>
       </div>
@@ -155,8 +198,17 @@ export function PreviousAnalyses({ onLoad, isLoading }: PreviousAnalysesProps) {
             return (
               <Card
                 key={analysis.id}
-                className="group cursor-pointer border border-border/40 bg-card/30 backdrop-blur-sm hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200 rounded-2xl overflow-hidden"
+                role="button"
+                tabIndex={0}
+                aria-label={`Load analysis "${analysis.name}" (${analysis.row_count.toLocaleString()} rows, ${analysis.column_count} columns)`}
+                className="group cursor-pointer border border-border/40 bg-card/30 backdrop-blur-sm hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition-all duration-200 rounded-2xl overflow-hidden"
                 onClick={() => onLoad(analysis.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onLoad(analysis.id);
+                  }
+                }}
               >
                 <CardHeader className="p-4 pb-3">
                   <div className="flex items-start justify-between gap-2">
@@ -173,9 +225,10 @@ export function PreviousAnalyses({ onLoad, isLoading }: PreviousAnalysesProps) {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-muted-foreground hover:text-destructive rounded-lg shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={(e) => handleDelete(analysis.id, e)}
+                      onClick={(e) => requestDelete(analysis, e)}
                       disabled={deletingId === analysis.id}
                       title="Delete"
+                      aria-label={`Delete analysis "${analysis.name}"`}
                     >
                       {deletingId === analysis.id ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -232,6 +285,44 @@ export function PreviousAnalyses({ onLoad, isLoading }: PreviousAnalysesProps) {
           })}
         </div>
       )}
+
+      {hasMore && !loading && (
+        <div className="flex justify-center pt-2">
+          <Button
+            variant="outline"
+            onClick={() => fetchAnalyses({ reset: false })}
+            disabled={loadingMore}
+            className="gap-2 rounded-xl"
+          >
+            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+            {loadingMore ? 'Loading...' : `Load more (${total - analyses.length} remaining)`}
+          </Button>
+        </div>
+      )}
+
+      <AlertDialog open={!!pendingDelete} onOpenChange={(o) => { if (!o) setPendingDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this analysis?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete ? (
+                <>
+                  &quot;{pendingDelete.name}&quot; ({pendingDelete.row_count.toLocaleString()} rows · {pendingDelete.column_count} columns) will be permanently removed. This cannot be undone.
+                </>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

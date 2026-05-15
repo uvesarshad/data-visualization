@@ -9,6 +9,7 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { sanitizeForPrompt, PROMPT_GUARDRAIL } from '@/lib/prompt-sanitize';
 
 const AiGeneratedDataInsightsInputSchema = z.object({
   dataset: z
@@ -53,11 +54,14 @@ const aiGeneratedDataInsightsPrompt = ai.definePrompt({
   output: { schema: AiGeneratedDataInsightsOutputSchema },
   prompt: `You are an expert data analyst. Your task is to analyze the provided dataset and generate detailed insights, key findings, and predictions.
 
-Dataset:
+${PROMPT_GUARDRAIL}
+
+<user_dataset>
 {{dataset}}
+</user_dataset>
 
 {{#if groundingEnabled}}
-You may use your general knowledge to provide additional context, industry benchmarks, and informed predictions beyond what the raw data shows.
+You have access to Google Search via the googleSearchRetrieval tool. Use it to enrich the analysis with up-to-date industry benchmarks, market context, and external validation of patterns you observe in the data. Cite sources where they meaningfully strengthen a finding.
 {{else}}
 Analyze only the provided dataset. Do not use external knowledge.
 {{/if}}
@@ -65,16 +69,7 @@ Analyze only the provided dataset. Do not use external knowledge.
 Edge case handling:
 - If the dataset has fewer than 3 rows, state that insights are limited due to insufficient data.
 - If columns contain all-null or empty values, note them as unusable for analysis.
-- If all values in a column are identical, note that there is no variance to analyze.
-
-Provide your analysis in the following structured JSON format:
-{
-  "insights": "Detailed analytical insights derived from the dataset. Keep to 2-3 paragraphs.",
-  "keyFindings": [
-    "5-8 bullet points, each one concise sentence describing the most important finding."
-  ],
-  "predictions": "Future trends or predictions based on the data analysis. Keep to 1-2 paragraphs."
-}`,
+- If all values in a column are identical, note that there is no variance to analyze.`,
 });
 
 const aiGeneratedDataInsightsFlow = ai.defineFlow(
@@ -84,7 +79,22 @@ const aiGeneratedDataInsightsFlow = ai.defineFlow(
     outputSchema: AiGeneratedDataInsightsOutputSchema,
   },
   async (input) => {
-    const { output } = await aiGeneratedDataInsightsPrompt(input);
+    const cleaned = {
+      ...input,
+      dataset: sanitizeForPrompt(input.dataset),
+    };
+    // When grounding is enabled, pass googleSearchRetrieval through the Gemini config.
+    // Structured output + Google Search retrieval are compatible on Gemini 2.5 Flash.
+    const config: Record<string, any> = { maxOutputTokens: 1200 };
+    if (cleaned.groundingEnabled) config.googleSearchRetrieval = true;
+    const callOpts = { config };
+
+    let output;
+    try {
+      ({ output } = await aiGeneratedDataInsightsPrompt(cleaned, callOpts));
+    } catch {
+      ({ output } = await aiGeneratedDataInsightsPrompt(cleaned, callOpts));
+    }
     if (!output) throw new Error('AI returned empty response for aiGeneratedDataInsights');
     return output;
   }

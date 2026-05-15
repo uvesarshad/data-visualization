@@ -2,6 +2,8 @@
 
 // Statistical analysis utilities
 
+import { iterMinMax } from '@/lib/math-iter';
+
 export interface RegressionResult {
   slope: number;
   intercept: number;
@@ -248,8 +250,7 @@ export function computeHistogram(
   const valid = values.filter(v => !isNaN(v));
   if (valid.length === 0) return { bins: [], mean: 0, stdDev: 0 };
 
-  const min = Math.min(...valid);
-  const max = Math.max(...valid);
+  const { min, max } = iterMinMax(valid);
   const range = max - min || 1;
   const binWidth = range / binCount;
 
@@ -312,6 +313,120 @@ export function detectAnomalies(values: number[]): { normal: number[]; anomalies
     normal,
     anomalies,
     threshold: { lower: percentiles.lowerFence, upper: percentiles.upperFence },
+  };
+}
+
+/**
+ * Try to parse a value as a numeric timestamp (ms since epoch).
+ * Accepts Date instances, numeric epochs (s or ms), and ISO/RFC strings.
+ * Returns null when the value can't reasonably be interpreted as time.
+ */
+export function parseTimestamp(v: unknown): number | null {
+  if (v == null) return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v.getTime();
+  if (typeof v === 'number') {
+    if (!isFinite(v)) return null;
+    // Heuristic: if it looks like seconds (< year 2300 in seconds), upscale to ms
+    return v < 1e11 ? v * 1000 : v;
+  }
+  if (typeof v === 'string') {
+    const s = v.trim();
+    if (!s) return null;
+    // Reject pure numeric strings — `Number("5") = 5` would otherwise pretend "5" is a timestamp.
+    // Only accept numeric strings that look long enough to be epochs.
+    const asNum = Number(s);
+    if (!isNaN(asNum) && /^\d+$/.test(s)) {
+      if (asNum < 1e9) return null;
+      return asNum < 1e11 ? asNum * 1000 : asNum;
+    }
+    const ms = Date.parse(s);
+    return isNaN(ms) ? null : ms;
+  }
+  return null;
+}
+
+/**
+ * Time-aware linear forecast.
+ *
+ * Returns one entry per future period with the predicted x value (ms) and y value.
+ * If fewer than 60% of `xRaw` values parse as timestamps, falls back to index-based
+ * regression and sets `timeAware: false` so the caller can label the chart accordingly.
+ */
+export function forecastTimeAware(
+  xRaw: unknown[],
+  yValues: number[],
+  periods: number = 3,
+): {
+  timeAware: boolean;
+  forecast: { x: number | null; y: number }[];
+  confidence: { lower: number[]; upper: number[] };
+} {
+  const n = Math.min(xRaw.length, yValues.length);
+  if (n < 2) {
+    return {
+      timeAware: false,
+      forecast: Array.from({ length: periods }, () => ({ x: null, y: yValues[0] || 0 })),
+      confidence: { lower: Array(periods).fill(0), upper: Array(periods).fill(0) },
+    };
+  }
+
+  const parsed = xRaw.slice(0, n).map(parseTimestamp);
+  const validCount = parsed.filter(p => p != null).length;
+  const timeAware = validCount / n >= 0.6;
+
+  if (timeAware) {
+    // Build (timestamp, y) pairs and regress
+    const pairs: { x: number; y: number }[] = [];
+    for (let i = 0; i < n; i++) {
+      if (parsed[i] != null && !isNaN(yValues[i])) pairs.push({ x: parsed[i] as number, y: yValues[i] });
+    }
+    pairs.sort((a, b) => a.x - b.x);
+    if (pairs.length < 2) {
+      // Degenerate: not enough valid pairs
+      return forecastIndexFallback(yValues, periods);
+    }
+    const xs = pairs.map(p => p.x);
+    const ys = pairs.map(p => p.y);
+    const reg = linearRegression(xs, ys);
+
+    // Future timestamps: continue at the median interval
+    const intervals = xs.slice(1).map((x, i) => x - xs[i]).sort((a, b) => a - b);
+    const medianInterval = intervals[Math.floor(intervals.length / 2)] || 1;
+    const lastX = xs[xs.length - 1];
+
+    const residuals = ys.map((y, i) => y - reg.predictions[i]);
+    const residualStd = Math.sqrt(residuals.reduce((a, r) => a + r * r, 0) / residuals.length);
+
+    const forecast: { x: number; y: number }[] = [];
+    const lower: number[] = [];
+    const upper: number[] = [];
+    for (let i = 0; i < periods; i++) {
+      const fx = lastX + medianInterval * (i + 1);
+      const fy = reg.slope * fx + reg.intercept;
+      forecast.push({ x: fx, y: Math.round(fy * 100) / 100 });
+      const margin = 1.96 * residualStd * Math.sqrt(1 + 1 / xs.length);
+      lower.push(Math.round((fy - margin) * 100) / 100);
+      upper.push(Math.round((fy + margin) * 100) / 100);
+    }
+    return { timeAware: true, forecast, confidence: { lower, upper } };
+  }
+
+  return forecastIndexFallback(yValues, periods);
+}
+
+function forecastIndexFallback(
+  yValues: number[],
+  periods: number,
+): {
+  timeAware: boolean;
+  forecast: { x: number | null; y: number }[];
+  confidence: { lower: number[]; upper: number[] };
+} {
+  const indexed = forecastLinear(yValues, periods);
+  return {
+    timeAware: false,
+    forecast: indexed.forecast.map(y => ({ x: null, y })),
+    confidence: indexed.confidence,
   };
 }
 

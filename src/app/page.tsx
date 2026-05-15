@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   LayoutDashboard, Table as TableIcon, Settings, FileText, BrainCircuit,
   Sparkles, Database, Moon, Sun, LayoutGrid, Zap, ChevronRight, Search,
@@ -18,15 +18,29 @@ import { NLQueryBar } from '@/components/dashboard/NLQueryBar';
 import { ReportDialog } from '@/components/dashboard/ReportDialog';
 import { SaveAnalysisDialog } from '@/components/dashboard/SaveAnalysisDialog';
 import { PreviousAnalyses } from '@/components/dashboard/PreviousAnalyses';
+import { AnomalyPanel } from '@/components/dashboard/AnomalyPanel';
+import { BatchAnalysisDialog } from '@/components/dashboard/BatchAnalysisDialog';
+import { PIIConsentBanner } from '@/components/dashboard/PIIConsentBanner';
+import { LoginDialog } from '@/components/auth/LoginDialog';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle,
+} from '@/components/ui/sheet';
 import { recommendVisualizations, RecommendVisualizationsOutput } from '@/ai/flows/ai-powered-visualization-recommendations';
 import { aiGeneratedDataInsights, AiGeneratedDataInsightsOutput } from '@/ai/flows/ai-generated-data-insights';
 import { perChartAnalysis, PerChartAnalysisOutput } from '@/ai/flows/per-chart-analysis';
 import { naturalLanguageQuery, NLQueryOutput } from '@/ai/flows/natural-language-query';
 import { generateReport, ReportGenerationOutput } from '@/ai/flows/report-generation';
-import { extractMetadata, ColumnMetadata } from '@/app/lib/data-processor';
+import { detectAnomaliesAI, AnomalyDetectionOutput } from '@/ai/flows/anomaly-detection';
+import { batchChartAnalysis, BatchChartAnalysisOutput } from '@/ai/flows/batch-chart-analysis';
+import { extractMetadata } from '@/app/lib/data-processor';
 import { computeStats, prepareChartData, isNumericColumn, autoDetectVisualizations } from '@/app/lib/chart-utils';
 import { validateData, cleanData } from '@/app/lib/data-validation';
 import { generateCacheKey, getCachedResult, setCachedResult, clearCache } from '@/lib/ai-cache';
+import { useDataStore } from '@/lib/data-store';
 import { dataToCompactTable, metadataToCompactFormat, statsToCompactFormat } from '@/lib/prompt-format';
 import { filterData } from '@/lib/filter-parser';
 import { truncateToTokenBudget } from '@/lib/token-budget';
@@ -42,8 +56,17 @@ import { cn } from '@/lib/utils';
 import { useTheme } from 'next-themes';
 
 export default function DataSenseDashboard() {
-  const [data, setData] = useState<any[] | null>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
+  // Centralized dataset state lives in the Zustand store
+  const data = useDataStore(s => s.data);
+  const fileName = useDataStore(s => s.fileName);
+  const metadata = useDataStore(s => s.metadata);
+  const metadataJson = useDataStore(s => s.metadataJson);
+  const columnStats = useDataStore(s => s.columnStats);
+  const validationWarnings = useDataStore(s => s.validationWarnings);
+  const storeSetData = useDataStore(s => s.setData);
+  const storeLoadAnalysis = useDataStore(s => s.loadAnalysisData);
+  const storeClearData = useDataStore(s => s.clearData);
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
   const [recommendations, setRecommendations] = useState<RecommendVisualizationsOutput | null>(null);
@@ -66,13 +89,31 @@ export default function DataSenseDashboard() {
   // Data Profiler state
   const [showProfiler, setShowProfiler] = useState(false);
 
+  // Anomaly Panel state
+  const [showAnomalies, setShowAnomalies] = useState(false);
+  const [anomalyResult, setAnomalyResult] = useState<AnomalyDetectionOutput | null>(null);
+  const [anomalyLoading, setAnomalyLoading] = useState(false);
+  const [anomalyError, setAnomalyError] = useState<string | null>(null);
+
+  // Batch Analysis state
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchResult, setBatchResult] = useState<BatchChartAnalysisOutput | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
+
+  // Destructive-action confirmation
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+
+  // Mobile sheets
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileInsightsOpen, setMobileInsightsOpen] = useState(false);
+
+  // Expand/collapse validation warnings (default: collapsed to 3)
+  const [warningsExpanded, setWarningsExpanded] = useState(false);
+
   // Report state
   const [reportOpen, setReportOpen] = useState(false);
   const [report, setReport] = useState<ReportGenerationOutput | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
-
-  // Validation warnings
-  const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
 
   // Sidebar collapsed
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -94,40 +135,49 @@ export default function DataSenseDashboard() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
-  // Cache metadata
-  const cachedMetadataRef = useRef<ColumnMetadata[] | null>(null);
-  const cachedMetadataJsonRef = useRef<string | null>(null);
+  // Auth state
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authenticated, setAuthenticated] = useState(true);
+  const [authGateEnabled, setAuthGateEnabled] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Centralized stats computation
-  const columnStats = useMemo(() => {
-    if (!data || data.length === 0) return {};
-    const stats: Record<string, any> = {};
-    const keys = Object.keys(data[0]);
-    keys.forEach(key => {
-      if (isNumericColumn(data, key)) {
-        const s = computeStats(data, key);
-        if (s) stats[key] = s;
-      }
-    });
-    return stats;
-  }, [data]);
+  // Check auth status on mount
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/me')
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled) return;
+        setAuthGateEnabled(!!d.gateEnabled);
+        setAuthenticated(!!d.authenticated);
+        setAuthChecked(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Fail open: assume authenticated if check fails (server probably down)
+        setAuthChecked(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
-  // Pre-slice data per chart recommendation
-  const chartDataMap = useMemo(() => {
-    if (!data || !recommendations) return new Map<number, any[]>();
-    const map = new Map<number, any[]>();
-    recommendations.recommendations.forEach((rec, idx) => {
+  // Pre-slice data + stable chart configs per recommendation.
+  // Returning a stable array of { chartData, config } per index means ChartPanel's
+  // internal useMemo doesn't invalidate on every parent re-render.
+  const preparedCharts = useMemo(() => {
+    if (!data || !recommendations) return [] as Array<{ chartData: any[]; config: { xAxis: string; yAxis: string; extraSeries: string[] } }>;
+    return recommendations.recommendations.map((rec) => {
       const xAxis = rec.columnsUsed[0];
       const yAxis = rec.columnsUsed[1] || rec.columnsUsed[0];
       const extraSeries = rec.columnsUsed.slice(2);
       const sliced = prepareChartData(data, rec.type, xAxis, yAxis, extraSeries);
-      map.set(idx, sliced.length > 0 ? sliced : data.slice(0, 50));
+      return {
+        chartData: sliced.length > 0 ? sliced : data.slice(0, 50),
+        config: { xAxis, yAxis, extraSeries },
+      };
     });
-    return map;
   }, [data, recommendations]);
 
   // Filtered NL query data
@@ -140,10 +190,10 @@ export default function DataSenseDashboard() {
   const handleDataLoaded = async (loadedData: any[], name: string) => {
     const cleaned = cleanData(loadedData, { removeEmptyRows: true, trimStrings: true });
     const validation = validateData(cleaned);
-    setValidationWarnings(validation.warnings);
-    
-    setData(cleaned);
-    setFileName(name);
+
+    // Order matters: flip "processing" FIRST so the dashboard mounts in skeleton mode,
+    // then push data into the store. Otherwise the dashboard briefly renders the empty
+    // chart grid before the skeletons appear (visible flash on every upload).
     setIsProcessing(true);
     setRecommendations(null);
     setInsights(null);
@@ -152,9 +202,10 @@ export default function DataSenseDashboard() {
     setNlQueryResult(null);
     setReport(null);
 
-    const metadata = extractMetadata(cleaned);
-    cachedMetadataRef.current = metadata;
-    cachedMetadataJsonRef.current = JSON.stringify(metadata);
+    // Store computes metadata + columnStats internally
+    const newMetadata = extractMetadata(cleaned);
+    const newMetadataJson = JSON.stringify(newMetadata);
+    storeSetData(cleaned, name, validation.warnings);
 
     if (cleaned.length < 2) {
       setAnalysisError('Dataset has too few rows for meaningful AI analysis.');
@@ -163,12 +214,12 @@ export default function DataSenseDashboard() {
     }
 
     try {
-      const vizCacheKey = generateCacheKey('recommendVisualizations', { metadata: cachedMetadataJsonRef.current, rowCount: cleaned.length });
+      const vizCacheKey = generateCacheKey('recommendVisualizations', { metadata: newMetadataJson, rowCount: cleaned.length });
       let vizResult = getCachedResult<RecommendVisualizationsOutput>(vizCacheKey);
-      
+
       if (!vizResult) {
         vizResult = await recommendVisualizations({
-          columnMetadata: metadata,
+          columnMetadata: newMetadata,
           rowCount: cleaned.length,
           datasetDescription: `Dataset loaded from file: ${name}. Columns: ${Object.keys(cleaned[0]).join(', ')}`
         });
@@ -184,8 +235,7 @@ export default function DataSenseDashboard() {
         title: 'Auto-Detection Mode',
         description: 'AI recommendations unavailable. Charts generated using automatic column detection.'
       });
-      // Fallback: generate recommendations by auto-detecting column types
-      const fallbackRecommendations = autoDetectVisualizations(metadata) as RecommendVisualizationsOutput;
+      const fallbackRecommendations = autoDetectVisualizations(newMetadata) as RecommendVisualizationsOutput;
       setRecommendations(fallbackRecommendations);
       generateInsights(cleaned, groundingEnabled);
     } finally {
@@ -202,7 +252,7 @@ export default function DataSenseDashboard() {
     setIsGeneratingInsights(true);
     setAnalysisError(null);
     try {
-      const cacheKey = generateCacheKey('aiGeneratedDataInsights', { dataHash: cachedMetadataJsonRef.current, grounded });
+      const cacheKey = generateCacheKey('aiGeneratedDataInsights', { dataHash: metadataJson, grounded });
       let result = getCachedResult<AiGeneratedDataInsightsOutput>(cacheKey);
       
       if (!result) {
@@ -264,6 +314,7 @@ export default function DataSenseDashboard() {
     }
   }, [toast, columnStats]);
 
+  // Re-derive handleNLQuery deps to include metadataJson + data
   const handleNLQuery = useCallback(async (query: string) => {
     if (!data) return;
     setNlQueryLoading(true);
@@ -271,14 +322,14 @@ export default function DataSenseDashboard() {
     setNlQueryChart(null);
 
     try {
-      const metadataJson = cachedMetadataJsonRef.current || JSON.stringify(extractMetadata(data));
-      const cacheKey = generateCacheKey('naturalLanguageQuery', { query, metadataJson });
+      const metaJson = metadataJson || JSON.stringify(extractMetadata(data));
+      const cacheKey = generateCacheKey('naturalLanguageQuery', { query, metaJson });
       let result = getCachedResult<NLQueryOutput>(cacheKey);
-      
+
       if (!result) {
         result = await naturalLanguageQuery({
           query,
-          columnMetadata: metadataJson,
+          columnMetadata: metaJson,
           rowCount: data.length,
         });
         setCachedResult(cacheKey, result);
@@ -291,7 +342,7 @@ export default function DataSenseDashboard() {
     } finally {
       setNlQueryLoading(false);
     }
-  }, [data, toast]);
+  }, [data, metadataJson, toast]);
 
   const handleGenerateReport = useCallback(async () => {
     if (!data || !fileName) return;
@@ -300,7 +351,9 @@ export default function DataSenseDashboard() {
     setReportLoading(true);
 
     try {
-      const metadata = cachedMetadataRef.current || extractMetadata(data);
+      // metadata held in the store; recompute only if somehow absent
+      const meta = metadata || extractMetadata(data);
+      void meta; // unused below, kept for parity / future use
       const compactStats = statsToCompactFormat(columnStats);
       const cacheKey = generateCacheKey('generateReport', { fileName, rowCount: data.length, insightsHash: insights?.insights?.substring(0, 100) });
       let result = getCachedResult<ReportGenerationOutput>(cacheKey);
@@ -318,13 +371,83 @@ export default function DataSenseDashboard() {
         setCachedResult(cacheKey, result);
       }
       setReport(result);
+
+      // Persist the report when the analysis has been saved to the DB.
+      // Fire-and-forget — failure is non-blocking.
+      if (currentAnalysisId && result) {
+        fetch(`/api/analyses/${currentAnalysisId}/reports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ report: result }),
+        }).catch(err => console.warn('[report-persist] failed to save report:', err));
+      }
     } catch (error) {
       console.error('Report generation error:', error);
       toast({ variant: 'destructive', title: 'Report Error', description: 'Failed to generate report.' });
     } finally {
       setReportLoading(false);
     }
-  }, [data, fileName, insights, toast, columnStats]);
+  }, [data, fileName, insights, toast, columnStats, currentAnalysisId]);
+
+  const handleAnomalyAI = useCallback(async (params: { dataset: string; columnStats: string; anomalies: string }) => {
+    setAnomalyLoading(true);
+    setAnomalyError(null);
+    try {
+      const cacheKey = generateCacheKey('anomalyDetection', { rows: data?.length, stats: params.columnStats.length, anomalies: params.anomalies.length });
+      let result = getCachedResult<AnomalyDetectionOutput>(cacheKey);
+      if (!result) {
+        result = await detectAnomaliesAI({
+          dataset: truncateToTokenBudget(params.dataset, 3000),
+          columnStats: truncateToTokenBudget(params.columnStats, 2000),
+          anomalies: truncateToTokenBudget(params.anomalies, 1500),
+        });
+        setCachedResult(cacheKey, result);
+      }
+      setAnomalyResult(result);
+    } catch (error) {
+      console.error('Anomaly AI error:', error);
+      setAnomalyError('Failed to run AI anomaly explanation. Please try again.');
+      toast({ variant: 'destructive', title: 'Anomaly Error', description: 'Failed to run AI anomaly explanation.' });
+    } finally {
+      setAnomalyLoading(false);
+    }
+  }, [data, toast]);
+
+  const handleBatchAnalysis = useCallback(async () => {
+    if (!data || !recommendations || recommendations.recommendations.length === 0) return;
+    setBatchOpen(true);
+    setBatchLoading(true);
+    setBatchResult(null);
+    try {
+      const charts = recommendations.recommendations.map((rec) => {
+        const cols = rec.columnsUsed;
+        const sample = data.slice(0, 10);
+        const statsInfo: Record<string, any> = {};
+        cols.forEach(col => {
+          if (columnStats[col]) statsInfo[col] = columnStats[col];
+        });
+        return {
+          chartTitle: rec.title,
+          chartType: rec.type,
+          columnsUsed: cols,
+          dataSummary: JSON.stringify({ sample, totalRows: data.length, columns: cols, statistics: statsInfo }),
+        };
+      });
+
+      const cacheKey = generateCacheKey('batchChartAnalysis', { chartCount: charts.length, titles: charts.map(c => c.chartTitle).join('|') });
+      let result = getCachedResult<BatchChartAnalysisOutput>(cacheKey);
+      if (!result) {
+        result = await batchChartAnalysis({ charts });
+        setCachedResult(cacheKey, result);
+      }
+      setBatchResult(result);
+    } catch (error) {
+      console.error('Batch analysis error:', error);
+      toast({ variant: 'destructive', title: 'Batch Analysis Error', description: 'Failed to analyze charts in batch.' });
+    } finally {
+      setBatchLoading(false);
+    }
+  }, [data, recommendations, columnStats, toast]);
 
   const handleExportData = () => {
     if (!data) return;
@@ -343,20 +466,21 @@ export default function DataSenseDashboard() {
   };
 
   const resetData = () => {
-    setData(null);
-    setFileName(null);
+    storeClearData();
     setRecommendations(null);
     setInsights(null);
     setAnalysisError(null);
     setNlQueryChart(null);
     setNlQueryResult(null);
     setReport(null);
-    setValidationWarnings([]);
     setActiveTab('visuals');
     setCurrentAnalysisId(null);
     setShowPrevious(false);
-    cachedMetadataRef.current = null;
-    cachedMetadataJsonRef.current = null;
+    setShowAnomalies(false);
+    setAnomalyResult(null);
+    setAnomalyError(null);
+    setBatchOpen(false);
+    setBatchResult(null);
     clearCache();
   };
 
@@ -365,12 +489,12 @@ export default function DataSenseDashboard() {
     if (!data || !fileName) return;
     setIsSaving(true);
     try {
-      const metadata = cachedMetadataRef.current || extractMetadata(data);
+      const meta = metadata || extractMetadata(data);
       const payload = {
         name,
         fileName,
         data,
-        metadata,
+        metadata: meta,
         recommendations: recommendations || undefined,
         insights: insights || undefined,
         columnStats: Object.keys(columnStats).length > 0 ? columnStats : undefined,
@@ -401,14 +525,26 @@ export default function DataSenseDashboard() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        if (!res.ok) throw new Error('Failed to save');
+        if (!res.ok) {
+          let body: any = null;
+          try { body = await res.json(); } catch {}
+          if (res.status === 413) {
+            const detail = body?.detail || 'Dataset is too large to save.';
+            toast({ variant: 'destructive', title: 'Dataset Too Large', description: detail });
+            throw new Error(detail);
+          }
+          throw new Error(body?.error || 'Failed to save');
+        }
         const result = await res.json();
         setCurrentAnalysisId(result.id);
         toast({ title: 'Analysis Saved', description: `"${name}" saved successfully.` });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Save error:', error);
-      toast({ variant: 'destructive', title: 'Save Error', description: 'Failed to save analysis.' });
+      // Don't double-toast for the 413 path (already toasted above)
+      if (!/too large/i.test(error?.message || '')) {
+        toast({ variant: 'destructive', title: 'Save Error', description: 'Failed to save analysis.' });
+      }
       throw error;
     } finally {
       setIsSaving(false);
@@ -430,11 +566,18 @@ export default function DataSenseDashboard() {
       const parsedWarnings = analysis.validation_warnings_json ? JSON.parse(analysis.validation_warnings_json) : [];
       const parsedMetadata = JSON.parse(analysis.metadata_json);
 
-      setData(parsedData);
-      setFileName(analysis.file_name);
+      // Push all loaded state into the store in one shot — no recompute needed
+      storeLoadAnalysis({
+        data: parsedData,
+        fileName: analysis.file_name,
+        metadata: parsedMetadata,
+        metadataJson: analysis.metadata_json,
+        columnStats: parsedColumnStats,
+        validationWarnings: parsedWarnings,
+      });
+
       setRecommendations(parsedRecommendations);
       setInsights(parsedInsights);
-      setValidationWarnings(parsedWarnings);
       setGroundingEnabled(!!analysis.grounding_enabled);
       setCurrentAnalysisId(analysis.id);
       setShowPrevious(false);
@@ -442,9 +585,6 @@ export default function DataSenseDashboard() {
       setNlQueryChart(null);
       setNlQueryResult(null);
       setActiveTab('visuals');
-
-      cachedMetadataRef.current = parsedMetadata;
-      cachedMetadataJsonRef.current = analysis.metadata_json;
 
       toast({ title: 'Analysis Loaded', description: `Restored "${analysis.name}" with ${analysis.row_count.toLocaleString()} rows.` });
     } catch (error) {
@@ -461,6 +601,15 @@ export default function DataSenseDashboard() {
     if (!data) return 0;
     return Object.keys(data[0]).filter(k => isNumericColumn(data, k)).length;
   }, [data]);
+
+  // Login dialog (only when gate enabled + not yet authenticated)
+  const loginDialog = (
+    <LoginDialog
+      open={authChecked && authGateEnabled && !authenticated}
+      onOpenChange={() => { /* not dismissible */ }}
+      onSuccess={() => setAuthenticated(true)}
+    />
+  );
 
   // ============= LANDING PAGE =============
   if (!data) {
@@ -567,6 +716,8 @@ export default function DataSenseDashboard() {
             </Card>
           </div>
         </div>
+        <PIIConsentBanner />
+        {loginDialog}
       </div>
     );
   }
@@ -576,10 +727,11 @@ export default function DataSenseDashboard() {
   const chartCount = recommendations?.recommendations.length || 0;
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
-      {/* Collapsible Sidebar */}
+    <div className="flex flex-col lg:flex-row min-h-screen lg:h-screen lg:overflow-hidden bg-background">
+      {/* Desktop Sidebar (hidden < lg) */}
       <aside className={cn(
-        "border-r border-border/60 bg-card/30 backdrop-blur-xl flex flex-col z-30 transition-all duration-300 ease-in-out",
+        "border-r border-border/60 bg-card/30 backdrop-blur-xl flex-col z-30 transition-all duration-300 ease-in-out",
+        "hidden lg:flex",
         sidebarCollapsed ? "w-[60px]" : "w-[240px]"
       )}>
         {/* Brand */}
@@ -610,6 +762,7 @@ export default function DataSenseDashboard() {
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             )}
             title="Dashboard"
+            aria-label="Dashboard"
           >
             <LayoutDashboard className="w-[18px] h-[18px] shrink-0" />
             {!sidebarCollapsed && <span>Dashboard</span>}
@@ -620,20 +773,37 @@ export default function DataSenseDashboard() {
             onClick={() => setShowProfiler(!showProfiler)}
             className={cn(
               "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
-              showProfiler 
-                ? "bg-primary/10 text-primary shadow-sm" 
+              showProfiler
+                ? "bg-primary/10 text-primary shadow-sm"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             )}
             title="Data Profiler"
+            aria-label="Data Profiler"
           >
             <Activity className="w-[18px] h-[18px] shrink-0" />
             {!sidebarCollapsed && <span>Data Profiler</span>}
           </button>
 
           <button
+            onClick={() => setShowAnomalies(!showAnomalies)}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
+              showAnomalies
+                ? "bg-orange-500/10 text-orange-500 shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            )}
+            title="Anomaly Detection"
+            aria-label="Anomaly Detection"
+          >
+            <GitBranch className="w-[18px] h-[18px] shrink-0" />
+            {!sidebarCollapsed && <span>Anomalies</span>}
+          </button>
+
+          <button
             onClick={() => setSaveDialogOpen(true)}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
             title="Save Analysis"
+            aria-label={currentAnalysisId ? 'Update saved analysis' : 'Save analysis'}
           >
             <Save className="w-[18px] h-[18px] shrink-0" />
             {!sidebarCollapsed && <span>{currentAnalysisId ? 'Update Analysis' : 'Save Analysis'}</span>}
@@ -648,6 +818,7 @@ export default function DataSenseDashboard() {
             onClick={handleGenerateReport}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
             title="Generate Report"
+            aria-label="Generate Report"
           >
             <FileBarChart className="w-[18px] h-[18px] shrink-0" />
             {!sidebarCollapsed && <span>Generate Report</span>}
@@ -657,15 +828,17 @@ export default function DataSenseDashboard() {
             onClick={handleExportData}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
             title="Export CSV"
+            aria-label="Export data as CSV"
           >
             <Download className="w-[18px] h-[18px] shrink-0" />
             {!sidebarCollapsed && <span>Export CSV</span>}
           </button>
 
           <button
-            onClick={resetData}
+            onClick={() => setResetConfirmOpen(true)}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
             title="New Dataset"
+            aria-label="Start with a new dataset"
           >
             <Upload className="w-[18px] h-[18px] shrink-0" />
             {!sidebarCollapsed && <span>New Dataset</span>}
@@ -679,6 +852,7 @@ export default function DataSenseDashboard() {
               onClick={toggleTheme}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
               title="Toggle Theme"
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             >
               {theme === 'dark' ? <Sun className="w-[18px] h-[18px] shrink-0" /> : <Moon className="w-[18px] h-[18px] shrink-0" />}
               {!sidebarCollapsed && <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
@@ -687,6 +861,7 @@ export default function DataSenseDashboard() {
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             title={sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
           >
             {sidebarCollapsed ? <PanelRight className="w-[18px] h-[18px] shrink-0" /> : <PanelRightClose className="w-[18px] h-[18px] shrink-0" />}
@@ -698,9 +873,19 @@ export default function DataSenseDashboard() {
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 relative">
         {/* Top Header Bar */}
-        <header className="h-16 border-b border-border/60 flex items-center justify-between px-6 bg-card/20 backdrop-blur-xl sticky top-0 z-20">
+        <header className="h-16 border-b border-border/60 flex items-center justify-between gap-2 px-3 sm:px-6 bg-card/20 backdrop-blur-xl sticky top-0 z-20">
           <div className="flex items-center gap-3 min-w-0">
-            <h2 className="font-headline font-bold text-lg tracking-tight shrink-0">Intelligence Dashboard</h2>
+            {/* Mobile menu trigger (< lg) */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="lg:hidden h-9 w-9 rounded-xl shrink-0"
+              onClick={() => setMobileNavOpen(true)}
+              aria-label="Open menu"
+            >
+              <Menu className="w-4 h-4" />
+            </Button>
+            <h2 className="font-headline font-bold text-base sm:text-lg tracking-tight shrink-0">Intelligence Dashboard</h2>
             <Separator orientation="vertical" className="h-5 mx-1" />
             <Badge variant="secondary" className="bg-muted/50 text-xs font-medium gap-1.5 shrink-0">
               <FileText className="w-3 h-3" />
@@ -731,11 +916,34 @@ export default function DataSenseDashboard() {
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Button size="sm" variant="outline" className="gap-1.5 text-xs font-medium h-8" onClick={handleGenerateReport}>
+            {/* Mobile insights trigger (< lg) */}
+            <Button
+              variant="outline"
+              size="icon"
+              className="lg:hidden h-8 w-8 rounded-xl"
+              onClick={() => setMobileInsightsOpen(true)}
+              aria-label="Open AI insights"
+            >
+              <BrainCircuit className="w-4 h-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="hidden sm:inline-flex gap-1.5 text-xs font-medium h-8"
+              onClick={handleBatchAnalysis}
+              disabled={!recommendations || recommendations.recommendations.length === 0 || batchLoading}
+              title="Run AI analysis across all charts at once"
+              aria-label="Batch analyze all charts"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              {batchLoading ? 'Analyzing...' : 'Batch Analyze'}
+            </Button>
+            <Button size="sm" variant="outline" className="hidden sm:inline-flex gap-1.5 text-xs font-medium h-8" onClick={handleGenerateReport}>
               <FileBarChart className="w-3.5 h-3.5" />Report
             </Button>
             <Button size="sm" className="gap-1.5 text-xs font-medium h-8 shadow-md shadow-primary/20" onClick={handleExportData}>
-              <Download className="w-3.5 h-3.5" />Export
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Export</span>
             </Button>
           </div>
         </header>
@@ -750,11 +958,24 @@ export default function DataSenseDashboard() {
                   <div className="w-8 h-8 rounded-xl bg-yellow-500/10 flex items-center justify-center shrink-0 mt-0.5">
                     <Zap className="w-4 h-4 text-yellow-500" />
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold uppercase tracking-wider text-yellow-600 mb-1">Data Quality Warnings</p>
-                    {validationWarnings.slice(0, 3).map((w, i) => (
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold uppercase tracking-wider text-yellow-600 mb-1">
+                      Data Quality Warnings ({validationWarnings.length})
+                    </p>
+                    {(warningsExpanded ? validationWarnings : validationWarnings.slice(0, 3)).map((w, i) => (
                       <p key={i} className="text-xs text-foreground/70 leading-relaxed">• {w}</p>
                     ))}
+                    {validationWarnings.length > 3 && (
+                      <button
+                        type="button"
+                        onClick={() => setWarningsExpanded(v => !v)}
+                        className="text-[11px] font-semibold text-yellow-600 hover:text-yellow-500 mt-1.5"
+                      >
+                        {warningsExpanded
+                          ? 'Show less'
+                          : `Show ${validationWarnings.length - 3} more`}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -789,7 +1010,13 @@ export default function DataSenseDashboard() {
                   </CardContent>
                 </Card>
               ) : (
-                <NLQueryBar onSubmit={handleNLQuery} isLoading={nlQueryLoading} result={nlQueryResult} onClearResult={() => { setNlQueryResult(null); setNlQueryChart(null); }} />
+                <NLQueryBar
+                  onSubmit={handleNLQuery}
+                  isLoading={nlQueryLoading}
+                  result={nlQueryResult}
+                  onClearResult={() => { setNlQueryResult(null); setNlQueryChart(null); }}
+                  columns={metadata?.map(m => ({ name: m.name, isNumerical: m.isNumerical, isCategorical: m.isCategorical, isTemporal: m.isTemporal }))}
+                />
               )}
 
               {/* NL Query Generated Chart */}
@@ -811,6 +1038,21 @@ export default function DataSenseDashboard() {
               {showProfiler && (
                 <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
                   <DataProfiler data={data} open={showProfiler} onClose={() => setShowProfiler(false)} />
+                </div>
+              )}
+
+              {/* Anomaly Detection */}
+              {showAnomalies && (
+                <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <AnomalyPanel
+                    data={data}
+                    open={showAnomalies}
+                    onClose={() => setShowAnomalies(false)}
+                    onRunAI={handleAnomalyAI}
+                    aiResult={anomalyResult}
+                    isLoadingAI={anomalyLoading}
+                    error={anomalyError}
+                  />
                 </div>
               )}
 
@@ -870,21 +1112,20 @@ export default function DataSenseDashboard() {
                     ) : recommendations ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
                         {recommendations.recommendations.map((rec, idx) => {
-                          const xAxis = rec.columnsUsed[0];
-                          const yAxis = rec.columnsUsed[1] || rec.columnsUsed[0];
-                          const extraSeries = rec.columnsUsed.slice(2);
-                          const chartData = chartDataMap.get(idx) || data;
+                          const prep = preparedCharts[idx];
+                          const chartData = prep?.chartData || data;
+                          const config = prep?.config || { xAxis: rec.columnsUsed[0], yAxis: rec.columnsUsed[1] || rec.columnsUsed[0], extraSeries: rec.columnsUsed.slice(2) };
                           return (
                             <div key={idx} className={cn(
                               idx === 0 ? "xl:col-span-2" : "col-span-1",
                               "min-h-[320px]"
                             )}>
-                              <ChartPanel 
+                              <ChartPanel
                                 type={rec.type}
                                 data={chartData}
                                 title={rec.title}
                                 description={rec.explanation}
-                                config={{ xAxis, yAxis, extraSeries }}
+                                config={config}
                                 onAnalyze={handleChartAnalysis}
                                 precomputedStats={columnStats}
                               />
@@ -912,10 +1153,10 @@ export default function DataSenseDashboard() {
             </div>
           </ScrollArea>
 
-          {/* Insights Sidebar */}
+          {/* Insights Sidebar (hidden < lg, shown as Sheet on mobile) */}
           <aside className={cn(
-            "border-l border-border/60 bg-card/10 backdrop-blur-2xl z-20 flex flex-col transition-all duration-300 ease-in-out",
-            "w-[380px]"
+            "border-l border-border/60 bg-card/10 backdrop-blur-2xl z-20 flex-col transition-all duration-300 ease-in-out",
+            "hidden lg:flex w-[320px] xl:w-[380px]"
           )}>
             <InsightsPanel 
               insights={insights?.insights}
@@ -942,6 +1183,136 @@ export default function DataSenseDashboard() {
         columnCount={data ? Object.keys(data[0]).length : 0}
         onSave={handleSaveAnalysis}
       />
+      <BatchAnalysisDialog
+        open={batchOpen}
+        onOpenChange={setBatchOpen}
+        result={batchResult}
+        isLoading={batchLoading}
+        chartCount={recommendations?.recommendations.length || 0}
+      />
+      {/* Mobile navigation Sheet */}
+      <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <SheetContent side="left" className="w-[280px] p-0 flex flex-col">
+          <SheetHeader className="p-4 border-b border-border/40 text-left">
+            <SheetTitle className="font-headline text-base flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-primary" /> DataSense
+            </SheetTitle>
+          </SheetHeader>
+          <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+            <button
+              onClick={() => { setActiveTab('visuals'); setMobileNavOpen(false); }}
+              className={cn(
+                "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
+                activeTab === 'visuals' ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted/50"
+              )}
+            >
+              <LayoutDashboard className="w-[18px] h-[18px]" />Dashboard
+            </button>
+            <button
+              onClick={() => { setShowProfiler(!showProfiler); setMobileNavOpen(false); }}
+              className={cn(
+                "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
+                showProfiler ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted/50"
+              )}
+            >
+              <Activity className="w-[18px] h-[18px]" />Data Profiler
+            </button>
+            <button
+              onClick={() => { setShowAnomalies(!showAnomalies); setMobileNavOpen(false); }}
+              className={cn(
+                "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
+                showAnomalies ? "bg-orange-500/10 text-orange-500" : "text-muted-foreground hover:bg-muted/50"
+              )}
+            >
+              <GitBranch className="w-[18px] h-[18px]" />Anomalies
+            </button>
+            <button
+              onClick={() => { setSaveDialogOpen(true); setMobileNavOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:bg-muted/50 transition-all"
+            >
+              <Save className="w-[18px] h-[18px]" />{currentAnalysisId ? 'Update Analysis' : 'Save Analysis'}
+            </button>
+            <Separator className="my-3" />
+            <button
+              onClick={() => { handleBatchAnalysis(); setMobileNavOpen(false); }}
+              disabled={!recommendations || recommendations.recommendations.length === 0 || batchLoading}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:bg-muted/50 transition-all disabled:opacity-40"
+            >
+              <Layers className="w-[18px] h-[18px]" />Batch Analyze
+            </button>
+            <button
+              onClick={() => { handleGenerateReport(); setMobileNavOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:bg-muted/50 transition-all"
+            >
+              <FileBarChart className="w-[18px] h-[18px]" />Generate Report
+            </button>
+            <button
+              onClick={() => { handleExportData(); setMobileNavOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:bg-muted/50 transition-all"
+            >
+              <Download className="w-[18px] h-[18px]" />Export CSV
+            </button>
+            <button
+              onClick={() => { setResetConfirmOpen(true); setMobileNavOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:bg-muted/50 transition-all"
+            >
+              <Upload className="w-[18px] h-[18px]" />New Dataset
+            </button>
+          </nav>
+          {mounted && (
+            <div className="p-3 border-t border-border/40">
+              <button
+                onClick={toggleTheme}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:bg-muted/50 transition-all"
+              >
+                {theme === 'dark' ? <Sun className="w-[18px] h-[18px]" /> : <Moon className="w-[18px] h-[18px]" />}
+                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+              </button>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* Mobile Insights Sheet */}
+      <Sheet open={mobileInsightsOpen} onOpenChange={setMobileInsightsOpen}>
+        <SheetContent side="right" className="w-full sm:w-[400px] p-0 flex flex-col">
+          <InsightsPanel
+            insights={insights?.insights}
+            findings={insights?.keyFindings}
+            predictions={insights?.predictions}
+            isLoading={isGeneratingInsights}
+            groundingEnabled={groundingEnabled}
+            onGroundingToggle={(enabled) => { setGroundingEnabled(enabled); if (data) generateInsights(data, enabled); }}
+            onRefresh={() => { if (data) generateInsights(data, groundingEnabled); }}
+            analysisError={analysisError}
+          />
+        </SheetContent>
+      </Sheet>
+
+      <AlertDialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Start with a new dataset?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will discard the current data, AI recommendations, insights, the report, and any unsaved analysis.
+              {currentAnalysisId
+                ? ' Your saved analysis remains in the database and can be reloaded from "View Previous Analyses".'
+                : ' Your current work has not been saved.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { setResetConfirmOpen(false); resetData(); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Discard and start over
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <PIIConsentBanner />
+      {loginDialog}
     </div>
   );
 }

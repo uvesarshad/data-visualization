@@ -9,6 +9,61 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { SAMPLE_DATASETS, SampleDataset } from '@/app/lib/sample-data';
 
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
+const MAX_FETCH_BYTES = 50 * 1024 * 1024;  // 50 MB cap on URL-fetched payloads
+
+const FORBIDDEN_JSON_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+/**
+ * Reject non-https URLs and obvious internal/loopback hosts. Client-side fetch
+ * is already CORS-bound, but this gives the user clear feedback and stops
+ * obvious mistakes (file://, http://localhost, ftp://, etc.).
+ */
+function validateImportUrl(input: string): { ok: true } | { ok: false; reason: string } {
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    return { ok: false, reason: 'Not a valid URL.' };
+  }
+  if (url.protocol !== 'https:') {
+    return { ok: false, reason: 'Only https:// URLs are allowed.' };
+  }
+  const host = url.hostname.toLowerCase();
+  // Block loopback / link-local / private ranges by hostname text. This is not a
+  // perfect SSRF check (DNS rebind/resolve is server-side concern), but it stops
+  // accidental "http://localhost" uploads from the browser.
+  if (host === 'localhost' || host === '0.0.0.0' || host === '::1' || host.endsWith('.local')) {
+    return { ok: false, reason: 'Loopback and .local hosts are not allowed.' };
+  }
+  if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^169\.254\./.test(host) || /^127\./.test(host)) {
+    return { ok: false, reason: 'Private/internal IP ranges are not allowed.' };
+  }
+  return { ok: true };
+}
+
+/**
+ * Defensive JSON parser:
+ *  - Strips forbidden keys (__proto__, prototype, constructor) at all object levels
+ *  - Unwraps a single common wrapper shape: { data: [...] } → [...]
+ *  - Returns the parsed value; caller still has to verify it's an array of objects.
+ */
+function safeParseJSON(text: string): unknown {
+  const parsed = JSON.parse(text, (key, value) => {
+    if (FORBIDDEN_JSON_KEYS.has(key)) return undefined;
+    return value;
+  });
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    // Common wrapper shape — many public APIs return { data: [...] }
+    if (Array.isArray(obj.data)) return obj.data;
+    if (Array.isArray(obj.results)) return obj.results;
+    if (Array.isArray(obj.items)) return obj.items;
+  }
+  return parsed;
+}
+
 interface DataUploaderProps {
   onDataLoaded: (data: any[], fileName: string) => void;
   isLoading: boolean;
@@ -33,20 +88,32 @@ export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
       return;
     }
 
+    if (file.size > MAX_UPLOAD_BYTES) {
+      const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+      const maxMb = Math.round(MAX_UPLOAD_BYTES / (1024 * 1024));
+      setError(`File is ${sizeMb} MB; the upload limit is ${maxMb} MB. Sample or filter your data before uploading.`);
+      return;
+    }
+
     try {
       let data: any[] = [];
       
       if (isCsv) {
         const text = await file.text();
-        const { parseCSV } = await import('@/app/lib/data-processor');
-        data = parseCSV(text);
+        const { parseCSVAsync } = await import('@/lib/data-worker-client');
+        data = await parseCSVAsync(text);
       } else if (isExcel) {
         const buffer = await file.arrayBuffer();
-        const { parseExcel } = await import('@/app/lib/data-processor');
-        data = await parseExcel(buffer);
+        const { parseExcelAsync } = await import('@/lib/data-worker-client');
+        data = await parseExcelAsync(buffer);
       } else {
         const text = await file.text();
-        data = JSON.parse(text);
+        const parsed = safeParseJSON(text);
+        if (!Array.isArray(parsed)) {
+          setError('Invalid data format. Expected an array of objects (or {data: [...]}).');
+          return;
+        }
+        data = parsed;
       }
 
       if (!Array.isArray(data)) {
@@ -66,34 +133,53 @@ export function DataUploader({ onDataLoaded, isLoading }: DataUploaderProps) {
     if (!dataUrl) return;
 
     setError(null);
+
+    const check = validateImportUrl(dataUrl);
+    if (!check.ok) {
+      setError(check.reason);
+      return;
+    }
+
     setIsFetching(true);
 
     try {
       const response = await fetch(dataUrl);
       if (!response.ok) throw new Error('Failed to fetch data from URL');
 
+      // Enforce size cap when the server tells us a length we can trust.
+      const cl = response.headers.get('content-length');
+      if (cl && Number(cl) > MAX_FETCH_BYTES) {
+        const sizeMb = (Number(cl) / (1024 * 1024)).toFixed(1);
+        throw new Error(`Remote file is ${sizeMb} MB; max ${Math.round(MAX_FETCH_BYTES / (1024 * 1024))} MB.`);
+      }
+
       const contentType = response.headers.get('content-type') || '';
       let data: any[] = [];
       let fileName = dataUrl.split('/').pop() || 'data';
 
       if (contentType.includes('application/json') || dataUrl.endsWith('.json')) {
-        data = await response.json();
+        const text = await response.text();
+        const parsed = safeParseJSON(text);
+        if (!Array.isArray(parsed)) throw new Error('JSON does not contain an array.');
+        data = parsed;
       } else if (contentType.includes('text/csv') || dataUrl.endsWith('.csv')) {
         const text = await response.text();
-        const { parseCSV } = await import('@/app/lib/data-processor');
-        data = parseCSV(text);
+        const { parseCSVAsync } = await import('@/lib/data-worker-client');
+        data = await parseCSVAsync(text);
       } else if (contentType.includes('spreadsheet') || dataUrl.endsWith('.xlsx') || dataUrl.endsWith('.xls')) {
         const buffer = await response.arrayBuffer();
-        const { parseExcel } = await import('@/app/lib/data-processor');
-        data = await parseExcel(buffer);
+        const { parseExcelAsync } = await import('@/lib/data-worker-client');
+        data = await parseExcelAsync(buffer);
       } else {
-        // Fallback: try to guess or just try JSON
+        // Fallback: try JSON, then CSV
+        const text = await response.text();
         try {
-          data = await response.json();
+          const parsed = safeParseJSON(text);
+          if (!Array.isArray(parsed)) throw new Error('not an array');
+          data = parsed;
         } catch {
-          const text = await response.text();
-          const { parseCSV } = await import('@/app/lib/data-processor');
-          data = parseCSV(text);
+          const { parseCSVAsync } = await import('@/lib/data-worker-client');
+          data = await parseCSVAsync(text);
         }
       }
 

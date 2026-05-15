@@ -6,6 +6,7 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { sanitizeForPrompt, sanitizeArrayForPrompt, PROMPT_GUARDRAIL } from '@/lib/prompt-sanitize';
 
 const ChartInputSchema = z.object({
   chartTitle: z.string().describe('The title of the chart.'),
@@ -44,6 +45,9 @@ const batchChartAnalysisPrompt = ai.definePrompt({
   output: { schema: BatchChartAnalysisOutputSchema },
   prompt: `You are an expert data analyst. Analyze the following charts and provide detailed insights for each.
 
+${PROMPT_GUARDRAIL}
+
+<user_charts>
 {{#each charts}}
 ---
 Chart: {{chartTitle}}
@@ -52,6 +56,7 @@ Columns: {{columnsUsed}}
 Data Summary: {{dataSummary}}
 ---
 {{/each}}
+</user_charts>
 
 For EACH chart, provide:
 1. What the data shows — key patterns, trends, distributions
@@ -71,7 +76,21 @@ const batchChartAnalysisFlow = ai.defineFlow(
     outputSchema: BatchChartAnalysisOutputSchema,
   },
   async (input) => {
-    const { output } = await batchChartAnalysisPrompt(input);
+    const cleaned = {
+      charts: input.charts.map(c => ({
+        chartTitle: sanitizeForPrompt(c.chartTitle, 200),
+        chartType: sanitizeForPrompt(c.chartType, 60),
+        columnsUsed: sanitizeArrayForPrompt(c.columnsUsed, 120),
+        dataSummary: sanitizeForPrompt(c.dataSummary),
+      })),
+    };
+    const callOpts = { config: { maxOutputTokens: 3000 } };
+    let output;
+    try {
+      ({ output } = await batchChartAnalysisPrompt(cleaned, callOpts));
+    } catch {
+      ({ output } = await batchChartAnalysisPrompt(cleaned, callOpts));
+    }
     if (!output) throw new Error('AI returned empty response for batchChartAnalysis');
     return output;
   }

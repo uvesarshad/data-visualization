@@ -2,6 +2,8 @@
 
 // Data validation and quality utilities
 
+import { detectColumnType } from '@/app/lib/data-processor';
+
 export interface ValidationResult {
   isValid: boolean;
   warnings: string[];
@@ -154,16 +156,13 @@ export function profileData(data: any[]): DataProfile {
     const uniqueValues = new Set(nonNullValues);
     const uniqueCount = uniqueValues.size;
 
-    // Determine type
+    // Determine type using the shared detector (single source of truth with extractMetadata)
     let type: ColumnProfile['type'] = 'empty';
     if (nonNullValues.length > 0) {
-      const numericCount = nonNullValues.filter(v => !isNaN(Number(v))).length;
-      const dateCount = nonNullValues.filter(v => !isNaN(Date.parse(String(v))) && isNaN(Number(v))).length;
-      const boolCount = nonNullValues.filter(v => typeof v === 'boolean' || String(v).toLowerCase() === 'true' || String(v).toLowerCase() === 'false').length;
-
-      if (numericCount / nonNullValues.length > 0.7) type = 'numeric';
-      else if (dateCount / nonNullValues.length > 0.7) type = 'temporal';
-      else if (boolCount / nonNullValues.length > 0.7) type = 'boolean';
+      const det = detectColumnType(values);
+      if (det.dataType === 'number') type = 'numeric';
+      else if (det.dataType === 'date') type = 'temporal';
+      else if (det.dataType === 'boolean') type = 'boolean';
       else if (uniqueCount / nonNullValues.length > 0.5) type = 'mixed';
       else type = 'categorical';
     }

@@ -1,27 +1,32 @@
 import { ColumnMetadataSchema } from '@/ai/flows/schemas';
 import { z } from 'zod';
+import { iterMin, iterMax } from '@/lib/math-iter';
 
 export type ColumnMetadata = z.infer<typeof ColumnMetadataSchema>;
 
-// 1.5: Iterative min/max to avoid stack overflow on large arrays
-function iterMin(values: number[]): number {
-  let min = Infinity;
-  for (let i = 0; i < values.length; i++) {
-    if (values[i] < min) min = values[i];
-  }
-  return min;
-}
+const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-function iterMax(values: number[]): number {
-  let max = -Infinity;
-  for (let i = 0; i < values.length; i++) {
-    if (values[i] > max) max = values[i];
-  }
-  return max;
+/**
+ * Coerce a raw string CSV cell to a value:
+ *  - trim whitespace
+ *  - empty → ''
+ *  - looks like a number AND not just whitespace → Number(s)
+ *  - otherwise → original string
+ */
+function coerceCellValue(raw: string | undefined): any {
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed === '') return '';
+  // Must contain at least one digit to be considered numeric (Number("") === 0 trap)
+  if (/\d/.test(trimmed) && !isNaN(Number(trimmed))) return Number(trimmed);
+  return trimmed;
 }
 
 // 3.5: Robust CSV parser handling quoted fields, commas in quotes, escaped quotes
 export function parseCSV(csv: string): any[] {
+  // Strip UTF-8 BOM so the first header isn't named "﻿id"
+  if (csv.charCodeAt(0) === 0xFEFF) csv = csv.slice(1);
+
   const lines: string[][] = [];
   let current: string[] = [];
   let field = '';
@@ -77,13 +82,11 @@ export function parseCSV(csv: string): any[] {
   }
 
   if (lines.length < 2) return [];
-  const headers = lines[0].map(h => h.trim());
+  const headers = lines[0].map(h => h.trim()).filter(h => !FORBIDDEN_KEYS.has(h));
   return lines.slice(1).map(values => {
-    const obj: any = {};
+    const obj: any = Object.create(null);
     headers.forEach((h, idx) => {
-      let val: any = values[idx]?.trim();
-      if (val !== undefined && val !== '' && !isNaN(val as any)) val = Number(val);
-      obj[h] = val;
+      obj[h] = coerceCellValue(values[idx]);
     });
     return obj;
   });
@@ -128,50 +131,123 @@ export async function parseExcel(buffer: ArrayBuffer): Promise<any[]> {
     }
   }
 
-  const headers = rows[headerIdx].map((h, i) => h !== null ? String(h).trim() : `Column_${i}`);
+  const headers = rows[headerIdx]
+    .map((h, i) => (h !== null && h !== undefined && String(h).trim() !== '' ? String(h).trim() : `Column_${i}`))
+    .map(h => (FORBIDDEN_KEYS.has(h) ? `${h}_` : h)); // sanitize unsafe keys
   const dataRows = rows.slice(headerIdx + 1);
 
   return dataRows
     .filter(row => row.some(cell => cell !== null && cell !== '')) // Skip empty rows
     .map(row => {
-      const obj: any = {};
+      const obj: any = Object.create(null);
       headers.forEach((h, i) => {
         let val = row[i];
         if (typeof val === 'string') val = val.trim();
-        // Convert numeric strings to numbers if they look like numbers
-        if (val !== null && val !== '' && !isNaN(val as any) && typeof val !== 'boolean') val = Number(val);
+        // Convert numeric strings to numbers only when they actually contain digits.
+        // `Number("  ")` is 0, and `isNaN("")` is false — those traps are why /\d/ is required.
+        if (typeof val === 'string' && val !== '' && /\d/.test(val) && !isNaN(val as any)) {
+          val = Number(val);
+        }
         obj[h] = val;
       });
       return obj;
     });
 }
 
+/**
+ * Threshold-based column type detection.
+ *
+ * Scans up to `sampleLimit` non-null values from a column and classifies based
+ * on which type dominates (>= 70%). This is the single source of truth used by
+ * both `extractMetadata` and `profileData` so they no longer disagree.
+ */
+export function detectColumnType(
+  values: any[],
+  sampleLimit: number = 200,
+): {
+  dataType: 'number' | 'boolean' | 'date' | 'string';
+  isNumerical: boolean;
+  isCategorical: boolean;
+  isTemporal: boolean;
+} {
+  const nonNull = values.filter(v => v !== null && v !== undefined && v !== '');
+  if (nonNull.length === 0) {
+    return { dataType: 'string', isNumerical: false, isCategorical: false, isTemporal: false };
+  }
+  const sample = nonNull.slice(0, sampleLimit);
+
+  let numericCount = 0;
+  let dateCount = 0;
+  let boolCount = 0;
+  for (const v of sample) {
+    if (typeof v === 'number' && isFinite(v)) {
+      numericCount++;
+      continue;
+    }
+    if (typeof v === 'boolean') {
+      boolCount++;
+      continue;
+    }
+    if (v instanceof Date) {
+      if (!isNaN(v.getTime())) dateCount++;
+      continue;
+    }
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (!s) continue;
+      const sl = s.toLowerCase();
+      if (sl === 'true' || sl === 'false') { boolCount++; continue; }
+      // Numeric: require at least one digit so " " and "abc" don't count.
+      if (/\d/.test(s) && !isNaN(Number(s))) {
+        numericCount++;
+        continue;
+      }
+      // Date: must NOT also be numeric (already handled above). Use a stricter
+      // shape check than just Date.parse, which accepts e.g. "0".
+      const looksDate = /^\d{4}-\d{1,2}-\d{1,2}/.test(s)            // ISO-ish
+        || /^\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}/.test(s)              // US/EU shapes
+        || /^[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{2,4}/.test(s);         // "Jan 5, 2024"
+      if (looksDate) {
+        const ms = Date.parse(s);
+        if (!isNaN(ms)) { dateCount++; continue; }
+      }
+    }
+  }
+
+  const total = sample.length;
+  const ratio = (n: number) => n / total;
+  if (ratio(numericCount) >= 0.7) return { dataType: 'number', isNumerical: true, isCategorical: false, isTemporal: false };
+  if (ratio(dateCount) >= 0.7) return { dataType: 'date', isNumerical: false, isCategorical: false, isTemporal: true };
+  if (ratio(boolCount) >= 0.7) return { dataType: 'boolean', isNumerical: false, isCategorical: true, isTemporal: false };
+  return { dataType: 'string', isNumerical: false, isCategorical: true, isTemporal: false };
+}
+
 export function extractMetadata(data: any[]): ColumnMetadata[] {
   if (data.length === 0) return [];
   const keys = Object.keys(data[0]);
-  
+
   return keys.map(key => {
     const values = data.map(row => row[key]);
-    const firstVal = values.find(v => v !== null && v !== undefined);
-    
-    const isNumerical = typeof firstVal === 'number';
-    const isDate = firstVal instanceof Date || (!isNaN(Date.parse(firstVal)) && isNaN(Number(firstVal)) && String(firstVal).includes('-'));
-    const isCategorical = !isNumerical && !isDate;
+    const { dataType, isNumerical, isCategorical, isTemporal } = detectColumnType(values);
 
     const uniqueValues = Array.from(new Set(values));
-    const numericValues = values.filter(v => typeof v === 'number') as number[];
+    // Coerce numeric strings before treating as number (handles loosely-typed JSON)
+    const numericValues = isNumerical
+      ? values
+          .map(v => (typeof v === 'number' ? v : typeof v === 'string' && /\d/.test(v) ? Number(v) : NaN))
+          .filter(v => !isNaN(v) && isFinite(v)) as number[]
+      : [];
 
     return {
       name: key,
-      dataType: isNumerical ? 'number' : isDate ? 'date' : typeof firstVal === 'boolean' ? 'boolean' : 'string',
+      dataType,
       isCategorical,
       isNumerical,
-      isTemporal: !!isDate,
+      isTemporal,
       uniqueValuesCount: uniqueValues.length,
-      // 1.5: Use iterative min/max to prevent stack overflow on large arrays
-      min: isNumerical && numericValues.length > 0 ? iterMin(numericValues) : undefined,
-      max: isNumerical && numericValues.length > 0 ? iterMax(numericValues) : undefined,
-      avg: isNumerical && numericValues.length > 0 ? numericValues.reduce((a, b) => a + b, 0) / numericValues.length : undefined,
+      min: numericValues.length > 0 ? iterMin(numericValues) : undefined,
+      max: numericValues.length > 0 ? iterMax(numericValues) : undefined,
+      avg: numericValues.length > 0 ? numericValues.reduce((a, b) => a + b, 0) / numericValues.length : undefined,
       exampleValues: uniqueValues.slice(0, 5).map(v => String(v))
     };
   });

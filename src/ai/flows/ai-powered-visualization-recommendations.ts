@@ -10,6 +10,8 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 import {ColumnMetadataSchema} from '@/ai/flows/schemas';
+import {CHART_TYPES} from '@/ai/flows/chart-types';
+import {sanitizeForPrompt, sanitizeArrayForPrompt, PROMPT_GUARDRAIL} from '@/lib/prompt-sanitize';
 
 const RecommendVisualizationsInputSchema = z.object({
   columnMetadata: z.array(ColumnMetadataSchema).describe('An array of metadata for each column in the dataset.'),
@@ -19,30 +21,7 @@ const RecommendVisualizationsInputSchema = z.object({
 export type RecommendVisualizationsInput = z.infer<typeof RecommendVisualizationsInputSchema>;
 
 const VisualizationRecommendationSchema = z.object({
-  type: z.enum([
-    'bar_chart',
-    'line_graph',
-    'scatter_plot',
-    'pie_chart',
-    'area_chart',
-    'radar_chart',
-    'composed_chart',
-    'stacked_bar',
-    'donut_chart',
-    'radial_bar',
-    'horizontal_bar',
-    'grouped_bar',
-    'stacked_area',
-    'bubble_chart',
-    'multi_bar',
-    'treemap_chart',
-    'box_plot',
-    'waterfall_chart',
-    'histogram',
-    'gauge_kpi',
-    'forecast_chart',
-    'distribution',
-  ]).describe('The recommended type of visualization.'),
+  type: z.enum(CHART_TYPES).describe('The recommended type of visualization.'),
   title: z.string().describe('A catchy title for this specific chart.'),
   explanation: z.string().describe('A brief explanation of why this visualization is suitable.'),
   columnsUsed: z.array(z.string()).describe('An array of column names used. First is usually X-axis/Category, subsequent are Y-axis/Values.'),
@@ -65,7 +44,9 @@ const prompt = ai.definePrompt({
   output: {schema: RecommendVisualizationsOutputSchema},
   prompt: `You are an expert data visualization specialist. Your task is to analyze the provided dataset characteristics and recommend as many diverse visualizations as possible (up to 9) to create a comprehensive dashboard.
 
-For each recommendation, choose the best type from the full supported list: bar_chart, line_graph, scatter_plot, pie_chart, area_chart, radar_chart, composed_chart, stacked_bar, donut_chart, radial_bar, horizontal_bar, grouped_bar, stacked_area, bubble_chart, multi_bar, treemap_chart, box_plot, waterfall_chart, histogram, gauge_kpi, forecast_chart, distribution.
+${PROMPT_GUARDRAIL}
+
+For each recommendation, choose the best type from the full supported list: ${CHART_TYPES.join(', ')}.
 
 Rules:
 1. Mix and match different types to show different angles of the data. Use at least 6 different chart types.
@@ -94,13 +75,14 @@ Rules:
 9. For forecast_chart, prefer temporal columns for X-axis.
 10. Create diverse titles that describe what each chart reveals about the data.
 
-Dataset Description: {{{datasetDescription}}}
+<user_dataset_description>{{{datasetDescription}}}</user_dataset_description>
 Row Count: {{{rowCount}}}
 
-Column Metadata:
+<user_column_metadata>
 {{#each columnMetadata}}
 - Name: {{{name}}}, Type: {{{dataType}}}, Categorical: {{{isCategorical}}}, Numerical: {{{isNumerical}}}, Temporal: {{{isTemporal}}}, Unique: {{{uniqueValuesCount}}}, Min: {{{min}}}, Max: {{{max}}}, Examples: {{#if exampleValues}}[{{#each exampleValues}}'{{{this}}}'{{#unless @last}}, {{/unless}}{{/each}}]{{else}}N/A{{/if}}
 {{/each}}
+</user_column_metadata>
 
 Example:
 Given columns [Region (categorical, uniques:5), Revenue (numerical, min:1000, max:50000), Month (temporal, uniques:12), Profit (numerical, min:200, max:15000)], good recommendations include:
@@ -120,7 +102,23 @@ const recommendVisualizationsFlow = ai.defineFlow(
     outputSchema: RecommendVisualizationsOutputSchema,
   },
   async input => {
-    const {output} = await prompt(input);
+    const cleaned = {
+      ...input,
+      datasetDescription: sanitizeForPrompt(input.datasetDescription ?? '', 500),
+      columnMetadata: input.columnMetadata.map(c => ({
+        ...c,
+        name: sanitizeForPrompt(c.name, 120),
+        exampleValues: c.exampleValues ? sanitizeArrayForPrompt(c.exampleValues, 80) : c.exampleValues,
+      })),
+    };
+    const callOpts = { config: { maxOutputTokens: 2000 } };
+    let output;
+    try {
+      ({output} = await prompt(cleaned, callOpts));
+    } catch (err) {
+      // One retry on transient / schema-violation errors
+      ({output} = await prompt(cleaned, callOpts));
+    }
     if (!output) throw new Error('AI returned empty response for recommendVisualizations');
     return output;
   }

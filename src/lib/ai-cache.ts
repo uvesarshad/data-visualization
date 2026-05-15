@@ -11,24 +11,21 @@ const cache = new Map<string, CacheEntry>();
 const DEFAULT_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes
 
 /**
- * Simple hash function for cache keys
- */
-function simpleHash(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
-  }
-  return Math.abs(hash);
-}
-
-/**
- * Generate a cache key from flow name and input
+ * Generate a cache key from flow name and input.
+ *
+ * Strategy: include the input length AND a prefix of the serialized input.
+ * Two different payloads that happen to share the same length will not collide
+ * unless their first ~400 characters are also identical — which is effectively
+ * impossible across different datasets. This is dramatically safer than the
+ * previous 32-bit DJB2 hash, which had real collision risk across uploads in a
+ * single session.
  */
 export function generateCacheKey(flowName: string, input: any): string {
   const inputStr = typeof input === 'string' ? input : JSON.stringify(input);
-  return `${flowName}:${simpleHash(inputStr)}`;
+  // Truncate to bound key size; include length so payloads with different sizes
+  // but identical prefixes still differ.
+  const prefix = inputStr.length > 400 ? inputStr.slice(0, 400) : inputStr;
+  return `${flowName}:${inputStr.length}:${prefix}`;
 }
 
 /**

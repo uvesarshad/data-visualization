@@ -15,6 +15,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { computeStats, isNumericColumn, getUniqueValues } from '@/app/lib/chart-utils';
+import { parseTimestamp } from '@/app/lib/statistics';
 
 interface StatsOverviewProps {
   data: Record<string, any>[];
@@ -31,17 +32,34 @@ export function StatsOverview({ data }: StatsOverviewProps) {
     const primaryNumeric = numericColumns[0];
     const primaryStats = primaryNumeric ? computeStats(data, primaryNumeric) : null;
 
+    // Find a temporal column to anchor the trend. Without one, "trend" is
+    // meaningless (row order is arbitrary for most datasets), so we suppress it.
+    const temporalCol = (() => {
+      for (const col of categoricalColumns) {
+        const sample = data.slice(0, Math.min(20, data.length));
+        const parsedCount = sample.filter(r => parseTimestamp(r[col]) != null).length;
+        if (parsedCount / sample.length >= 0.6) return col;
+      }
+      return null;
+    })();
+
     let trend: 'up' | 'down' | 'neutral' = 'neutral';
     let trendPct = 0;
-    if (primaryNumeric && data.length >= 10) {
-      const mid = Math.floor(data.length / 2);
-      const firstHalf = data.slice(0, mid);
-      const secondHalf = data.slice(mid);
-      const firstAvg = firstHalf.reduce((sum, row) => sum + (Number(row[primaryNumeric]) || 0), 0) / firstHalf.length;
-      const secondAvg = secondHalf.reduce((sum, row) => sum + (Number(row[primaryNumeric]) || 0), 0) / secondHalf.length;
-      if (firstAvg > 0) {
-        trendPct = Math.round(((secondAvg - firstAvg) / firstAvg) * 10000) / 100;
-        trend = trendPct > 2 ? 'up' : trendPct < -2 ? 'down' : 'neutral';
+    if (primaryNumeric && temporalCol && data.length >= 10) {
+      // Sort a copy by parsed timestamp so the "first half / second half" split
+      // is chronological, not row-order.
+      const sortable = data
+        .map(r => ({ ts: parseTimestamp(r[temporalCol]), value: Number(r[primaryNumeric]) || 0 }))
+        .filter(r => r.ts != null)
+        .sort((a, b) => (a.ts! - b.ts!));
+      if (sortable.length >= 10) {
+        const mid = Math.floor(sortable.length / 2);
+        const firstAvg = sortable.slice(0, mid).reduce((s, r) => s + r.value, 0) / mid;
+        const secondAvg = sortable.slice(mid).reduce((s, r) => s + r.value, 0) / (sortable.length - mid);
+        if (firstAvg !== 0) {
+          trendPct = Math.round(((secondAvg - firstAvg) / Math.abs(firstAvg)) * 10000) / 100;
+          trend = trendPct > 2 ? 'up' : trendPct < -2 ? 'down' : 'neutral';
+        }
       }
     }
 

@@ -66,7 +66,9 @@ export function ChartPanel({ type, data, title, description, config, onAnalyze, 
         if (numKey) currentConfig = { ...currentConfig, yAxis: numKey };
       }
 
-      console.log('[ChartPanel] Preparing data for:', type, 'config:', currentConfig);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[ChartPanel] Preparing data for:', type, 'config:', currentConfig);
+      }
       
       const prepared = prepareChartData(data, type, currentConfig.xAxis, currentConfig.yAxis, currentConfig.extraSeries);
       

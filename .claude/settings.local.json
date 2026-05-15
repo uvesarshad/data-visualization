@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"E:\\\\Projects\\\\data-visualization-main\" -Force)",
+      "Bash(Select-Object -Property Name, FullName)",
+      "Bash(findstr /I \"env\")",
+      "PowerShell($env:TEMP)",
+      "Bash(npx tsc *)",
+      "Bash(npm install *)",
+      "Bash(npx vitest *)"
+    ]
+  }
+}
